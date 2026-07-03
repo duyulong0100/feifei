@@ -1,0 +1,5 @@
+# 客户端依赖（不含 faster-whisper，转录由服务端完成）
+pyqt6>=6.6.0
+pyaudio>=0.2.13
+numpy>=1.24.0
+requests>=2.31.0

@@ -1,0 +1,9 @@
+# 服务端依赖
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9      # fastapi 文件上传需要
+faster-whisper>=1.0.0
+numpy>=1.24.0
+openai>=1.30.0               # LLM 润色（兼容 GPT / Ollama 等 OpenAI 格式接口）
+noisereduce>=3.0.0          # 谱减法降噪（可选，需配合 soundfile）
+soundfile>=0.12.0           # noisereduce 依赖

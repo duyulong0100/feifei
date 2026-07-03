@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>飞飞转录 · 管理后台</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* LLM 卡专用样式 */
+    .field-label { font-size:12px; color:var(--text-secondary); margin-bottom:5px; }
+    .field-row   { display:flex; gap:8px; align-items:center; }
+    input[type="text"], input[type="password"], textarea {
+      width:100%; padding:7px 11px;
+      background:var(--bg-primary); border:1px solid var(--border);
+      border-radius:6px; color:var(--text-primary); font-size:13px;
+      font-family:inherit; outline:none; transition:border-color .15s;
+      box-sizing:border-box;
+    }
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    textarea:focus { border-color:var(--accent-blue); }
+    textarea { resize:vertical; min-height:72px; line-height:1.5; }
+    .provider-row { display:flex; gap:6px; flex-wrap:wrap; }
+    .toggle-row { display:flex; align-items:center; gap:10px; }
+    .toggle {
+      position:relative; width:40px; height:22px; cursor:pointer;
+    }
+    .toggle input { opacity:0; width:0; height:0; }
+    .slider {
+      position:absolute; inset:0; background:var(--border);
+      border-radius:11px; transition:background .2s;
+    }
+    .slider::before {
+      content:''; position:absolute;
+      width:16px; height:16px; left:3px; bottom:3px;
+      background:#fff; border-radius:50%; transition:transform .2s;
+    }
+    input:checked + .slider { background:var(--accent-blue); }
+    input:checked + .slider::before { transform:translateX(18px); }
+    .toggle-label { font-size:13px; color:var(--text-secondary); }
+    .task-tabs { display:flex; gap:0; }
+    .task-tab {
+      padding:5px 14px; background:transparent;
+      border:1px solid var(--border); color:var(--text-secondary);
+      font-size:12px; font-family:inherit; cursor:pointer; transition:all .15s;
+    }
+    .task-tab:first-child { border-radius:6px 0 0 6px; }
+    .task-tab:last-child  { border-radius:0 6px 6px 0; }
+    .task-tab:not(:first-child) { border-left:none; }
+    .task-tab.active {
+      background:rgba(96,165,250,.15); border-color:var(--accent-blue);
+      color:var(--accent-blue); font-weight:600;
+    }
+    .test-badge {
+      display:inline-block; padding:3px 10px; border-radius:4px;
+      font-size:12px; margin-left:8px;
+    }
+    .test-badge.ok    { background:rgba(74,222,128,.15); color:var(--accent-green); }
+    .test-badge.error { background:rgba(248,113,113,.15); color:var(--accent-red); }
+
+    /* 客户端记录列表 */
+    .client-row {
+      border:1px solid var(--border); border-radius:8px;
+      margin-bottom:8px; overflow:hidden;
+    }
+    .client-row-header {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 14px; cursor:pointer;
+      background:var(--bg-primary); transition:background .15s;
+    }
+    .client-row-header:hover { background:var(--bg-hover,#222); }
+    .client-id-tag {
+      font-family:monospace; font-size:12px;
+      color:var(--accent-blue); flex-shrink:0;
+    }
+    .client-row-meta {
+      font-size:12px; color:var(--text-tertiary); flex:1;
+    }
+    .client-row-body {
+      display:none; padding:12px 14px 14px;
+      background:var(--bg-secondary); border-top:1px solid var(--border);
+    }
+    .client-row-body.open { display:block; }
+    .compare-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:12px;
+    }
+    @media (max-width:600px) { .compare-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+
+<!-- 顶栏 -->
+<div class="topbar">
+  <img src="/static/logo.png" alt="logo" style="height:32px;width:auto;margin-right:10px;border-radius:8px;">
+  <span class="topbar-brand">飞飞转录</span>
+  <span class="topbar-sub">管理后台</span>
+  <div class="topbar-spacer"></div>
+  <a href="/docs" target="_blank" class="btn btn-secondary" style="font-size:12px;padding:4px 12px">API 文档</a>
+</div>
+
+<div class="page">
+
+  <!-- ── 服务状态 ─────────────────────────────────────────── -->
+  <div class="card" id="statusCard">
+    <div class="card-title">服务状态</div>
+    <div class="status-row" id="statusRow">
+      <div class="status-dot pulse" id="statusDot"></div>
+      <span id="statusText">连接中…</span>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--text-tertiary)" id="statusDetail"></div>
+  </div>
+
+  <!-- ── 模型选择 ─────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">模型选择</div>
+    <div class="pill-group" id="modelPillGroup"></div>
+    <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px" id="modelHint"></div>
+    <div class="divider"></div>
+    <div class="action-row">
+      <button class="btn btn-secondary" id="btnDownload" onclick="downloadModel()">
+        ☁&nbsp; 下载所选模型
+      </button>
+      <span style="font-size:12px;color:var(--text-tertiary)" id="downloadNote"></span>
+    </div>
+    <div class="progress-wrap" id="dlProgress">
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill indeterminate" id="dlBar"></div>
+      </div>
+      <div class="progress-msg" id="dlMsg"></div>
+    </div>
+  </div>
+
+  <!-- ── 质量预设 ─────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">质量预设</div>
+    <div class="pill-group" id="qualityPillGroup"></div>
+    <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px" id="qualityHint"></div>
+  </div>
+
+  <!-- ── 保存转录配置 ─────────────────────────────────────── -->
+  <div class="action-row" style="justify-content:flex-end;margin-top:4px">
+    <span style="font-size:12px;color:var(--text-tertiary);flex:1" id="saveNote">
+      修改后点击保存，服务端将重新加载模型。
+    </span>
+    <button class="btn btn-primary" id="btnSave" onclick="saveConfig()">
+      保存配置
+    </button>
+  </div>
+
+  <!-- ── 音频预处理 ────────────────────────────────────────── -->
+  <div class="card" style="margin-top:28px">
+    <div class="card-title">音频预处理</div>
+    <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">
+      在送入 Whisper 前用 ffmpeg 滤镜链对音频降噪、去回声、归一化，提升识别准确率。
+    </div>
+
+    <!-- 启用开关 + 环境状态 -->
+    <div class="toggle-row" style="margin-bottom:16px">
+      <label class="toggle">
+        <input type="checkbox" id="preEnabled" onchange="onPreEnabledChange()">
+        <span class="slider"></span>
+      </label>
+      <span class="toggle-label" id="preEnabledLabel">已关闭</span>
+      <span id="preEnvBadge" style="margin-left:8px"></span>
+    </div>
+
+    <div id="preFields">
+      <!-- 预设强度 -->
+      <div style="margin-bottom:14px">
+        <div class="field-label">降噪强度预设</div>
+        <div class="task-tabs" id="prePresetTabs">
+          <button class="task-tab" onclick="selectPreset('light')">轻度</button>
+          <button class="task-tab" onclick="selectPreset('balanced')">均衡</button>
+          <button class="task-tab" onclick="selectPreset('aggressive')">强力</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:5px" id="prePresetHint"></div>
+      </div>
+
+      <!-- 高级选项 -->
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="preEchoReduction">
+          <span>回声抑制（speechnorm）</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer" id="preNrWrap">
+          <input type="checkbox" id="preSpectralGating">
+          <span>谱减法降噪（noisereduce）</span>
+        </label>
+      </div>
+
+      <!-- 谱减法强度（仅谱减法启用时显示）-->
+      <div id="preNrStrengthWrap" style="display:none;margin-bottom:12px">
+        <div class="field-label">谱减法强度：<span id="preNrStrengthVal">75%</span></div>
+        <input type="range" id="preNrStrength" min="0" max="100" value="75"
+               oninput="document.getElementById('preNrStrengthVal').textContent=this.value+'%'"
+               style="width:200px;accent-color:var(--accent-blue)">
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" onclick="savePreConfig()">保存预处理配置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LLM 润色配置 ─────────────────────────────────────── -->
+  <div class="card" style="margin-top:28px">
+    <div class="card-title">大模型润色</div>
+    <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:14px">
+      启用后，每次转录完成会自动将全文送给 LLM 处理，客户端直接收到润色结果，无需手动操作。
+    </div>
+
+    <!-- 启用开关 -->
+    <div class="toggle-row" style="margin-bottom:16px">
+      <label class="toggle">
+        <input type="checkbox" id="llmEnabled" onchange="onLlmEnabledChange()">
+        <span class="slider"></span>
+      </label>
+      <span class="toggle-label" id="llmEnabledLabel">已关闭</span>
+      <span id="llmTestBadge"></span>
+    </div>
+
+    <div id="llmFields">
+      <!-- Provider 快捷按钮 -->
+      <div style="margin-bottom:14px">
+        <div class="field-label">接口类型</div>
+        <div class="provider-row">
+          <button class="pill" onclick="setProvider('openai')">OpenAI / 兼容</button>
+          <button class="pill" onclick="setProvider('ollama')">Ollama 本地</button>
+          <button class="pill" onclick="setProvider('custom')">自定义</button>
+        </div>
+      </div>
+
+      <!-- 自动执行任务 -->
+      <div style="margin-bottom:14px">
+        <div class="field-label">自动执行任务</div>
+        <div class="task-tabs" id="autoTaskTabs">
+          <button class="task-tab" onclick="selectAutoTask('polish')">✍️ 润色</button>
+          <button class="task-tab" onclick="selectAutoTask('segment')">¶ 分段</button>
+          <button class="task-tab" onclick="selectAutoTask('both')">✨ 两者</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:5px" id="autoTaskHint"></div>
+      </div>
+
+      <!-- Base URL + API Key 并排 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <div class="field-label">Base URL</div>
+          <input type="text" id="llmBaseUrl" placeholder="https://api.openai.com/v1">
+        </div>
+        <div>
+          <div class="field-label">API Key</div>
+          <div class="field-row">
+            <input type="password" id="llmApiKey" placeholder="sk-…（本地服务可留空）" style="flex:1">
+          </div>
+        </div>
+      </div>
+
+      <!-- 模型名称 -->
+      <div style="margin-bottom:12px">
+        <div class="field-label">模型名称</div>
+        <input type="text" id="llmModel" placeholder="gpt-4o-mini / llama3 / …">
+      </div>
+
+      <!-- 系统提示词 -->
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div class="field-label" style="margin:0">系统提示词</div>
+          <div class="task-tabs" id="promptTabs">
+            <button class="task-tab active" onclick="switchTask('polish')">润色</button>
+            <button class="task-tab" onclick="switchTask('segment')">分段</button>
+            <button class="task-tab" onclick="switchTask('both')">两者</button>
+          </div>
+        </div>
+        <textarea id="llmPrompt" rows="4"></textarea>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-row">
+        <button class="btn btn-secondary" onclick="testLlm()">🔌&nbsp; 测试连接</button>
+        <button class="btn btn-primary"   onclick="saveLlmConfig()">保存 LLM 配置</button>
+      </div>
+    </div><!-- /llmFields -->
+  </div>
+
+  <!-- ── 客户端转录记录 ───────────────────────────────────── -->
+  <div class="card" style="margin-top:28px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <div class="card-title" style="margin:0">客户端转录记录</div>
+      <span id="clientCount" style="font-size:12px;color:var(--text-tertiary)"></span>
+      <div style="flex:1"></div>
+      <button class="btn btn-secondary" style="padding:3px 10px;font-size:12px"
+              onclick="loadLatest()">↻ 刷新</button>
+    </div>
+
+    <div id="clientEmpty" style="font-size:13px;color:var(--text-tertiary);padding:8px 0">
+      暂无记录，完成一次录音后此处显示各客户端的转录对比。
+    </div>
+
+    <div id="clientList"></div>
+  </div>
+
+</div><!-- /page -->
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   全局状态
+═══════════════════════════════════════════════════════════ */
+const state = {
+  models:     [],
+  presets:    [],
+  selModel:   null,
+  selQuality: null,
+  loaded:     false,
+  currentId:  null,
+};
+
+const pre = {
+  preset: 'balanced',
+  presetHints: {},
+  nrAvailable: false,
+};
+
+const llm = {
+  selTask:  'polish',
+  autoTask: 'polish',
+  prompts:  {},
+};
+
+const AUTO_TASK_HINTS = {
+  polish:  '转录完成后自动润色：修正错别字和语病，使文字流畅自然',
+  segment: '转录完成后自动分段：识别话题，每段加【标题】',
+  both:    '转录完成后润色并分段：同时修正文字和整理结构',
+};
+
+/* ═══════════════════════════════════════════════════════════
+   初始化
+═══════════════════════════════════════════════════════════ */
+async function init() {
+  try {
+    const [configRes, modelsRes, presetsRes, llmRes, preRes] = await Promise.all([
+      fetch('/api/config'),
+      fetch('/api/models'),
+      fetch('/api/quality-presets'),
+      fetch('/api/polish/config'),
+      fetch('/api/preprocess/config'),
+    ]);
+    const cfg     = await configRes.json();
+    const models  = await modelsRes.json();
+    const presets = await presetsRes.json();
+    const llmData = await llmRes.json();
+    const preData = await preRes.json();
+
+    state.models     = models.models;
+    state.presets    = presets.presets;
+    state.selModel   = cfg.model_size;
+    state.selQuality = cfg.quality_key;
+    state.loaded     = cfg.model_loaded;
+    state.currentId  = cfg.current_model_id;
+
+    renderStatus(cfg);
+    renderModelPills();
+    renderQualityPills();
+    renderPreConfig(preData);
+    renderLlmConfig(llmData);
+  } catch (e) {
+    setStatus('error', '无法连接服务端', '请确认服务器正在运行');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   状态卡
+═══════════════════════════════════════════════════════════ */
+function setStatus(cls, text, detail) {
+  document.getElementById('statusDot').className = `status-dot ${cls}`;
+  document.getElementById('statusText').textContent = text;
+  document.getElementById('statusDetail').textContent = detail || '';
+}
+
+function renderStatus(cfg) {
+  if (cfg.model_loaded) {
+    setStatus('ok', `✅ 模型已就绪：${cfg.current_model_id}`, `质量预设：${cfg.quality_key}`);
+  } else {
+    setStatus('warn', '⚠️ 模型未加载', '请选择模型并点击「保存配置」');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   模型 Pills
+═══════════════════════════════════════════════════════════ */
+function renderModelPills() {
+  const group = document.getElementById('modelPillGroup');
+  group.innerHTML = '';
+  state.models.forEach(m => {
+    const btn = document.createElement('button');
+    btn.className = 'pill' + (m.downloaded ? ' downloaded' : '') +
+                   (state.selModel === m.size ? ' active' : '');
+    btn.innerHTML = `<span class="check">✓</span>${m.label}<span class="hint">${m.hint}</span>`;
+    btn.onclick = () => { state.selModel = m.size; renderModelPills(); updateDownloadNote(); };
+    group.appendChild(btn);
+  });
+  updateModelHint();
+}
+
+function updateModelHint() {
+  const m = state.models.find(x => x.size === state.selModel);
+  document.getElementById('modelHint').textContent = m
+    ? (m.downloaded ? `${m.label}（${m.hint}）已下载` : `${m.label}（${m.hint}）未下载`) : '';
+  updateDownloadNote();
+}
+
+function updateDownloadNote() {
+  const m = state.models.find(x => x.size === state.selModel);
+  document.getElementById('downloadNote').textContent = m
+    ? (m.downloaded ? `「${m.size}」已在本地` : `将下载约 ${m.hint}`) : '';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   质量 Pills
+═══════════════════════════════════════════════════════════ */
+function renderQualityPills() {
+  const group = document.getElementById('qualityPillGroup');
+  group.innerHTML = '';
+  state.presets.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'pill' + (state.selQuality === p.key ? ' active' : '');
+    btn.innerHTML = `${p.key}<span class="hint">${p.hint}</span>`;
+    btn.onclick = () => { state.selQuality = p.key; renderQualityPills(); };
+    group.appendChild(btn);
+  });
+  const p = state.presets.find(x => x.key === state.selQuality);
+  document.getElementById('qualityHint').textContent = p ? p.hint : '';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   模型下载
+═══════════════════════════════════════════════════════════ */
+async function downloadModel() {
+  if (!state.selModel) return;
+  const size = state.selModel;
+  document.getElementById('btnDownload').disabled = true;
+  const prog = document.getElementById('dlProgress');
+  const msg  = document.getElementById('dlMsg');
+  prog.classList.add('visible');
+  msg.textContent = `准备下载「${size}」…`;
+
+  try {
+    const res    = await fetch(`/api/models/${size}/download`, { method: 'POST' });
+    const reader = res.body.getReader();
+    const dec    = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === 'progress') { msg.textContent = evt.message; }
+        else if (evt.type === 'done') {
+          msg.textContent = evt.message || '下载完成';
+          showToast(`✅ ${evt.message || '下载完成'}`);
+          const r = await fetch('/api/models'); const d = await r.json();
+          state.models = d.models; renderModelPills();
+        } else if (evt.type === 'error') {
+          msg.textContent = `❌ ${evt.message}`;
+          showToast(`❌ 下载失败：${evt.message}`);
+        }
+      }
+    }
+  } catch (e) {
+    msg.textContent = `❌ 网络错误：${e.message}`;
+    showToast(`❌ 网络错误：${e.message}`);
+  } finally {
+    document.getElementById('btnDownload').disabled = false;
+    setTimeout(() => prog.classList.remove('visible'), 3000);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   保存转录配置
+═══════════════════════════════════════════════════════════ */
+async function saveConfig() {
+  const btn  = document.getElementById('btnSave');
+  const note = document.getElementById('saveNote');
+  btn.disabled = true;
+  note.textContent = '正在保存并重新加载模型，请稍候…';
+  note.style.color = 'var(--text-secondary)';
+  try {
+    const res  = await fetch('/api/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_size: state.selModel, quality_key: state.selQuality }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '未知错误');
+    note.textContent = '✅ 配置已保存，模型已重新加载';
+    note.style.color = 'var(--accent-green)';
+    showToast('✅ 配置保存成功');
+    const cfgRes = await fetch('/api/config');
+    const cfg    = await cfgRes.json();
+    state.loaded = cfg.model_loaded; state.currentId = cfg.current_model_id;
+    renderStatus(cfg);
+  } catch (e) {
+    note.textContent = `❌ 保存失败：${e.message}`;
+    note.style.color = 'var(--accent-red)';
+    showToast(`❌ ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { note.textContent = '修改后点击保存，服务端将重新加载模型。'; note.style.color = ''; }, 5000);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   音频预处理配置
+═══════════════════════════════════════════════════════════ */
+function renderPreConfig(data) {
+  const cfg = data.preprocess || {};
+  pre.presetHints  = {};
+  pre.nrAvailable  = data.env?.noisereduce || false;
+  (data.presets || []).forEach(p => { pre.presetHints[p.key] = p.hint; });
+
+  document.getElementById('preEnabled').checked = !!cfg.enabled;
+  onPreEnabledChange();
+
+  selectPreset(cfg.preset || 'balanced');
+
+  document.getElementById('preEchoReduction').checked  = !!cfg.echo_reduction;
+  document.getElementById('preSpectralGating').checked = !!cfg.spectral_gating;
+
+  const val = Math.round((cfg.nr_prop_decrease ?? 0.75) * 100);
+  document.getElementById('preNrStrength').value = val;
+  document.getElementById('preNrStrengthVal').textContent = val + '%';
+
+  toggleNrStrength();
+
+  // 环境徽标
+  const envBadge = document.getElementById('preEnvBadge');
+  const nr = pre.nrAvailable;
+  envBadge.innerHTML = data.env?.ffmpeg
+    ? `<span class="badge badge-green">ffmpeg ✅</span>` +
+      (nr ? `<span class="badge badge-green" style="margin-left:4px">noisereduce ✅</span>`
+           : `<span class="badge badge-yellow" style="margin-left:4px">noisereduce 未安装</span>`)
+    : `<span class="badge" style="background:rgba(248,113,113,.15);color:var(--accent-red)">ffmpeg 未找到</span>`;
+
+  // 谱减法复选框可用性
+  const nrWrap = document.getElementById('preNrWrap');
+  if (!nr) {
+    nrWrap.style.opacity = '0.45';
+    nrWrap.title = '请先安装：pip install noisereduce soundfile';
+    document.getElementById('preSpectralGating').disabled = true;
+  }
+
+  document.getElementById('preSpectralGating').addEventListener('change', toggleNrStrength);
+}
+
+function onPreEnabledChange() {
+  const on = document.getElementById('preEnabled').checked;
+  document.getElementById('preEnabledLabel').textContent = on ? '已启用' : '已关闭';
+  document.getElementById('preFields').style.opacity = on ? '1' : '0.45';
+}
+
+function selectPreset(p) {
+  pre.preset = p;
+  const keys = ['light', 'balanced', 'aggressive'];
+  document.querySelectorAll('#prePresetTabs .task-tab').forEach((t, i) => {
+    t.className = 'task-tab' + (keys[i] === p ? ' active' : '');
+  });
+  document.getElementById('prePresetHint').textContent = pre.presetHints[p] || '';
+}
+
+function toggleNrStrength() {
+  const show = document.getElementById('preSpectralGating').checked;
+  document.getElementById('preNrStrengthWrap').style.display = show ? '' : 'none';
+}
+
+async function savePreConfig() {
+  const body = {
+    enabled:          document.getElementById('preEnabled').checked,
+    preset:           pre.preset,
+    echo_reduction:   document.getElementById('preEchoReduction').checked,
+    spectral_gating:  document.getElementById('preSpectralGating').checked,
+    nr_prop_decrease: parseInt(document.getElementById('preNrStrength').value) / 100,
+  };
+  try {
+    const res  = await fetch('/api/preprocess/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '保存失败');
+    showToast('✅ 预处理配置已保存');
+  } catch (e) {
+    showToast(`❌ ${e.message}`);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LLM 配置
+═══════════════════════════════════════════════════════════ */
+function renderLlmConfig(data) {
+  const cfg = data.llm || {};
+  // 启用开关
+  document.getElementById('llmEnabled').checked = !!cfg.enabled;
+  onLlmEnabledChange();
+  // 字段值
+  document.getElementById('llmBaseUrl').value = cfg.base_url || '';
+  document.getElementById('llmApiKey').value  = '';   // 不回显 key
+  document.getElementById('llmModel').value   = cfg.model   || '';
+  // 自动任务
+  selectAutoTask(cfg.task || 'polish');
+  // 提示词
+  llm.prompts = cfg.prompts || {};
+  switchTask('polish');   // 默认显示润色提示词
+}
+
+function onLlmEnabledChange() {
+  const on = document.getElementById('llmEnabled').checked;
+  document.getElementById('llmEnabledLabel').textContent = on ? '已启用' : '已关闭';
+  document.getElementById('llmFields').style.opacity = on ? '1' : '0.45';
+}
+
+/* 自动任务选择 */
+function selectAutoTask(task) {
+  llm.autoTask = task;
+  const keys = ['polish', 'segment', 'both'];
+  document.querySelectorAll('#autoTaskTabs .task-tab').forEach((t, i) => {
+    t.className = 'task-tab' + (keys[i] === task ? ' active' : '');
+  });
+  document.getElementById('autoTaskHint').textContent = AUTO_TASK_HINTS[task] || '';
+}
+
+/* 快捷 Provider */
+function setProvider(type) {
+  const url   = document.getElementById('llmBaseUrl');
+  const model = document.getElementById('llmModel');
+  if (type === 'openai') {
+    url.value   = 'https://api.openai.com/v1';
+    model.value = model.value || 'gpt-4o-mini';
+  } else if (type === 'ollama') {
+    url.value   = 'http://localhost:11434/v1';
+    model.value = model.value || 'llama3.2';
+  }
+  // 高亮选中
+  document.querySelectorAll('.provider-row .pill').forEach(b => b.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+}
+
+/* 提示词 Tab 切换 */
+function switchTask(task) {
+  // 保存当前 tab 内容
+  if (llm.selTask) {
+    llm.prompts[llm.selTask] = document.getElementById('llmPrompt').value;
+  }
+  llm.selTask = task;
+  document.getElementById('llmPrompt').value = llm.prompts[task] || '';
+  // 更新 tab 样式
+  document.querySelectorAll('.task-tab').forEach((t, i) => {
+    const keys = ['polish', 'segment', 'both'];
+    t.className = 'task-tab' + (keys[i] === task ? ' active' : '');
+  });
+}
+
+/* 测试连接 */
+async function testLlm() {
+  // 保存当前 prompt 到 llm.prompts 再测试
+  llm.prompts[llm.selTask] = document.getElementById('llmPrompt').value;
+  const badge = document.getElementById('llmTestBadge');
+  badge.textContent = '测试中…'; badge.className = 'test-badge';
+  try {
+    const res  = await fetch('/api/polish/test', { method: 'POST' });
+    const data = await res.json();
+    badge.textContent = data.ok ? `✅ ${data.message}` : `❌ ${data.message}`;
+    badge.className   = 'test-badge ' + (data.ok ? 'ok' : 'error');
+  } catch (e) {
+    badge.textContent = `❌ 网络错误：${e.message}`;
+    badge.className   = 'test-badge error';
+  }
+}
+
+/* 保存 LLM 配置 */
+async function saveLlmConfig() {
+  // 先把当前 textarea 内容存入 llm.prompts
+  llm.prompts[llm.selTask] = document.getElementById('llmPrompt').value;
+
+  const body = {
+    enabled:  document.getElementById('llmEnabled').checked,
+    base_url: document.getElementById('llmBaseUrl').value.trim(),
+    model:    document.getElementById('llmModel').value.trim(),
+    task:     llm.autoTask,
+    prompts:  llm.prompts,
+  };
+  const apiKey = document.getElementById('llmApiKey').value.trim();
+  if (apiKey) body.api_key = apiKey;   // 只有用户输入时才覆盖已有 key
+
+  try {
+    const res  = await fetch('/api/polish/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '保存失败');
+    showToast('✅ LLM 配置已保存');
+    document.getElementById('llmApiKey').value = '';   // 清空 key 输入框
+  } catch (e) {
+    showToast(`❌ ${e.message}`);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Toast
+═══════════════════════════════════════════════════════════ */
+let _toastTimer = null;
+function showToast(msg, duration = 3000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   客户端转录记录（多客户端）
+═══════════════════════════════════════════════════════════ */
+async function loadLatest() {
+  try {
+    const res  = await fetch('/api/transcribe/latest');   // 不带 client_id → 返回全部
+    const data = await res.json();
+    renderClients(data);
+  } catch (e) {
+    console.warn('loadLatest error', e);
+  }
+}
+
+function renderClients(data) {
+  const empty = document.getElementById('clientEmpty');
+  const list  = document.getElementById('clientList');
+  const count = document.getElementById('clientCount');
+
+  if (data.empty || !data.records) {
+    empty.style.display = '';
+    list.innerHTML = '';
+    count.textContent = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  const records = data.records;   // 已按时间倒序
+  count.textContent = `共 ${records.length} 个客户端`;
+
+  // 保留已展开的行
+  const openIds = new Set(
+    [...list.querySelectorAll('.client-row-body.open')]
+      .map(el => el.dataset.clientId)
+  );
+
+  list.innerHTML = records.map(r => buildClientRow(r, openIds.has(r.client_id))).join('');
+}
+
+function buildClientRow(r, open) {
+  // 状态徽标
+  let badge = '';
+  if (!r.llm_enabled) {
+    badge = '<span class="badge badge-blue">原始转录</span>';
+  } else if (r.polished_ok) {
+    badge = `<span class="badge badge-green">✅ 润色 (${r.llm_task})</span>`;
+  } else {
+    badge = '<span class="badge" style="background:rgba(248,113,113,.15);color:var(--accent-red)">❌ 润色失败</span>';
+  }
+
+  // 元信息
+  const meta = [
+    r.timestamp?.replace('T',' ') || '',
+    `模型：${r.model_id || '?'}`,
+    `${((r.audio_bytes||0)/1024).toFixed(0)} KB`,
+    r.preprocess_on ? `降噪：${r.preprocess_preset}` : '',
+  ].filter(Boolean).join('  ·  ');
+
+  // 短 ID（前 8 位）
+  const shortId = (r.client_id || 'unknown').slice(0, 8);
+
+  // 对比区
+  const rawTa   = `<textarea readonly rows="5" style="resize:vertical;width:100%">${esc(r.raw_text||'')}</textarea>`;
+  const polTa   = r.llm_enabled
+    ? `<textarea readonly rows="5" style="resize:vertical;width:100%">${esc(r.polished_ok ? r.polished_text||'' : '（润色失败）')}</textarea>`
+    : `<textarea readonly rows="5" style="resize:vertical;width:100%;opacity:.5">${esc(r.raw_text||'')} </textarea>`;
+  const compare = r.llm_enabled
+    ? `<div class="compare-grid">
+         <div><div class="field-label">原始转录</div>${rawTa}</div>
+         <div><div class="field-label">AI 润色结果 ${r.polished_ok?'✅':'❌'}</div>${polTa}</div>
+       </div>`
+    : `<div><div class="field-label">转录结果</div>${rawTa}</div>`;
+
+  const errHtml = (r.llm_enabled && !r.polished_ok && r.llm_error)
+    ? `<div style="margin-top:8px;font-size:12px;color:var(--accent-red)">错误：${esc(r.llm_error)}</div>` : '';
+
+  return `
+    <div class="client-row">
+      <div class="client-row-header" onclick="toggleRow(this)">
+        <span class="client-id-tag" title="${esc(r.client_id||'')}">⬡ ${shortId}…</span>
+        <span class="client-row-meta">${esc(meta)}</span>
+        ${badge}
+        <span style="font-size:12px;color:var(--text-tertiary)">${open?'▲':'▼'}</span>
+      </div>
+      <div class="client-row-body ${open?'open':''}" data-client-id="${esc(r.client_id||'')}">
+        ${compare}${errHtml}
+      </div>
+    </div>`;
+}
+
+function toggleRow(header) {
+  const body = header.nextElementSibling;
+  const arrow = header.querySelector('span:last-child');
+  body.classList.toggle('open');
+  arrow.textContent = body.classList.contains('open') ? '▲' : '▼';
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 每 6 秒自动刷新
+setInterval(loadLatest, 6000);
+
+/* ═══════════════════════════════════════════════════════════
+   启动
+═══════════════════════════════════════════════════════════ */
+init();
+loadLatest();
+</script>
+</body>
+</html>

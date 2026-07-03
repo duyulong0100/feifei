@@ -152,13 +152,65 @@ bash make_dmg.sh
 
 ```
 speech-to-text/
-├── main_gui.py          # 主程序（PyQt6 界面 + 转录逻辑）
-├── 飞飞转录.spec         # PyInstaller 打包配置（含 info_plist）
+├── main_gui.py          # 原版：一体式本地应用（PyQt6 + 本地 Whisper）
+│
+├── server/              # 服务端（FastAPI + Whisper 模型管理）
+│   ├── main.py          # FastAPI 应用入口
+│   ├── config.py        # 模型配置读写
+│   ├── transcriber.py   # WhisperModel 单例 + 转录逻辑
+│   ├── routes/
+│   │   ├── admin.py     # 管理 API（配置/下载模型）
+│   │   └── transcribe.py # 转录 API（SSE 流式）
+│   ├── static/          # 管理后台 Web UI
+│   ├── run.py           # 启动脚本
+│   └── requirements.txt
+│
+├── client/              # 客户端（轻量 PyQt6 GUI，调用服务端 API）
+│   ├── main_gui.py      # 重构版界面（移除本地 Whisper 依赖）
+│   ├── api_client.py    # HTTP + SSE 客户端封装
+│   └── requirements.txt
+│
+├── 飞飞转录.spec         # PyInstaller 打包配置
 ├── build_mac.sh         # 打包 .app 脚本
 ├── make_dmg.sh          # 制作 DMG 脚本
-├── install_mac.sh       # 开发环境依赖安装
-└── whisper_models/      # 模型存放目录（打包时内置 small）
+└── whisper_models/      # 模型存放目录（供服务端使用）
 ```
+
+---
+
+## 服务端 + 客户端模式（新架构）
+
+适合多人共用同一台转录服务器（如团队内部部署）。
+
+### 1. 启动服务端
+
+```bash
+cd speech-to-text
+pip install -r server/requirements.txt
+python server/run.py
+# 默认监听 0.0.0.0:8000
+# 访问 http://localhost:8000 进入管理后台
+```
+
+管理后台功能：
+- 查看当前加载的模型和质量预设
+- 切换模型大小（tiny / base / small / medium / large-v3）
+- 触发模型下载（带进度条）
+- 更改质量预设并热重载模型
+
+### 2. 启动客户端
+
+```bash
+cd speech-to-text/client
+pip install -r requirements.txt
+python main_gui.py
+```
+
+首次启动后在「⚙ 服务器设置」中填入服务端地址（如 `http://192.168.1.100:8000`）。
+
+### 3. API 文档
+
+服务端启动后访问：`http://localhost:8000/docs`
 
 ---
 

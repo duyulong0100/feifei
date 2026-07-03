@@ -58,7 +58,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='飞飞转录.app',
-    icon=None,
+    icon='AppIcon.icns',
     bundle_identifier='com.feifei.transcription',
     info_plist={
         'LSMultipleInstancesProhibited': True,

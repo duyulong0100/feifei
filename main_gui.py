@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
     QLabel, QFileDialog, QMessageBox, QButtonGroup,
     QFrame, QSizePolicy, QMenuBar, QMenu, QStatusBar,
+    QComboBox,
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat, QColor, QAction, QFont
@@ -144,7 +145,6 @@ QMenu::separator { height: 1px; background: #2e2e33; margin: 4px 8px; }
 #sidebar {
     background: #1c1c1e;
     border-right: 1px solid #2e2e33;
-    min-width: 220px; max-width: 220px;
 }
 #sidebarBrand {
     font-family: "Poppins", -apple-system, sans-serif;
@@ -230,6 +230,53 @@ QMenu::separator { height: 1px; background: #2e2e33; margin: 4px 8px; }
     color: #e5e5e5;
     selection-background-color: rgba(96,165,250,0.25);
 }
+
+/* ── 底部工具栏 ──────────────────────────── */
+#bottomToolbar { background: #000000; }
+#tbLabel {
+    font-size: 10px; font-weight: 600;
+    color: #7c7c82; letter-spacing: 0.08em;
+    padding: 0;
+}
+
+/* ── 工具栏下拉选择器 ────────────────────── */
+QComboBox#tbCombo {
+    background: #1a1a1a;
+    border: 1px solid #2e2e33;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: #e5e5e5;
+    min-width: 90px;
+}
+QComboBox#tbCombo:hover { border-color: #3f3f46; }
+QComboBox#tbCombo:focus { border-color: #60a5fa; }
+QComboBox#tbCombo:disabled { color: #555558; border-color: #252525; }
+QComboBox#tbCombo::drop-down { border: none; width: 20px; }
+QComboBox#tbCombo::down-arrow {
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #7c7c82;
+    margin-right: 6px;
+}
+QComboBox#tbCombo QAbstractItemView {
+    background: #1c1c1e;
+    border: 1px solid #2e2e33;
+    border-radius: 8px;
+    padding: 4px;
+    color: #e5e5e5;
+    selection-background-color: rgba(96,165,250,0.2);
+    selection-color: #60a5fa;
+    outline: none;
+}
+QComboBox#tbCombo QAbstractItemView::item {
+    padding: 5px 10px;
+    border-radius: 4px;
+    min-height: 22px;
+}
+
+/* ── 侧边栏宽度缩小 ──────────────────────── */
+#sidebar { min-width: 160px; max-width: 160px; }
 
 /* ── 操作按钮（次要）─────────────────────── */
 #btnAction {
@@ -725,92 +772,19 @@ class MainWin(QMainWindow):
         # 1. 品牌头部
         header = QWidget()
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(16, 16, 16, 16); hl.setSpacing(10)
-        logo = QLabel("🐦"); logo.setFixedSize(28, 28)
+        hl.setContentsMargins(14, 16, 14, 16); hl.setSpacing(8)
+        logo = QLabel("🐦"); logo.setFixedSize(26, 26)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand = QLabel("飞飞转录"); brand.setObjectName("sidebarBrand")
         hl.addWidget(logo); hl.addWidget(brand); hl.addStretch()
         layout.addWidget(header)
         layout.addWidget(self._make_divider())
 
-        # 2. 主 CTA：录音按钮
-        rec_wrap = QWidget()
-        rcl = QVBoxLayout(rec_wrap)
-        rcl.setContentsMargins(12, 12, 12, 10)
-        self._btn_record = QPushButton("🎙  开始录音识别")
-        self._btn_record.setObjectName("btnRecord")
-        self._btn_record.setFixedHeight(40)
-        self._btn_record.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._btn_record.clicked.connect(self._toggle_record)
-        rcl.addWidget(self._btn_record)
-        layout.addWidget(rec_wrap)
-        layout.addWidget(self._make_divider())
-
-        # 3. 模型选择
-        layout.addWidget(self._section_title("MODELS"))
-        model_wrap = QWidget()
-        mcl = QVBoxLayout(model_wrap)
-        mcl.setContentsMargins(12, 0, 12, 8); mcl.setSpacing(4)
-        self._model_group = QButtonGroup(self); self._model_group.setExclusive(True)
-        self._model_btns  = {}
-        for sizes_row in [["tiny", "base", "small"], ["medium", "large-v3"]]:
-            row = QHBoxLayout(); row.setSpacing(4)
-            for size in sizes_row:
-                b = QPushButton(MODEL_LABELS[size]); b.setObjectName("pillBtn")
-                b.setCheckable(True)
-                self._model_group.addButton(b)
-                self._model_btns[size] = b; row.addWidget(b)
-            row.addStretch(); mcl.addLayout(row)
-        self._model_btns[self._cfg["model_size"]].setChecked(True)
-        self._model_group.buttonClicked.connect(self._on_sidebar_model_changed)
-        layout.addWidget(model_wrap)
-
-        # 4. 质量选择
-        layout.addWidget(self._section_title("QUALITY"))
-        q_wrap = QWidget()
-        qcl = QHBoxLayout(q_wrap)
-        qcl.setContentsMargins(12, 0, 12, 8); qcl.setSpacing(4)
-        self._quality_group = QButtonGroup(self); self._quality_group.setExclusive(True)
-        self._quality_btns  = {}
-        # 侧边栏用短标签
-        quality_short = {
-            "⚡ 速度": "⚡速度",
-            "⚖ 均衡": "⚖均衡",
-            "🎯 质量": "🎯质量",
-        }
-        for key in QUALITY_KEYS:
-            b = QPushButton(quality_short[key]); b.setObjectName("pillBtn")
-            b.setCheckable(True)
-            self._quality_group.addButton(b)
-            self._quality_btns[key] = b; qcl.addWidget(b)
-        qcl.addStretch()
-        self._quality_btns[self._cfg["quality_key"]].setChecked(True)
-        self._quality_group.buttonClicked.connect(self._on_sidebar_quality_changed)
-        layout.addWidget(q_wrap)
-
-        # 5. 模式选择
-        layout.addWidget(self._section_title("MODE"))
-        mode_wrap = QWidget()
-        mocl = QHBoxLayout(mode_wrap)
-        mocl.setContentsMargins(12, 0, 12, 8); mocl.setSpacing(4)
-        self._mode_group = QButtonGroup(self); self._mode_group.setExclusive(True)
-        self._mode_btns  = {}
-        mode_labels = {"batch": "📼 整段", "realtime": "⚡ 实时"}
-        for key, label in mode_labels.items():
-            b = QPushButton(label); b.setObjectName("pillBtn")
-            b.setCheckable(True)
-            self._mode_group.addButton(b)
-            self._mode_btns[key] = b; mocl.addWidget(b)
-        mocl.addStretch()
-        self._mode_btns[self._cfg.get("mode", "batch")].setChecked(True)
-        self._mode_group.buttonClicked.connect(self._on_sidebar_mode_changed)
-        layout.addWidget(mode_wrap)
-
         # 弹性空间
         layout.addStretch()
         layout.addWidget(self._make_divider())
 
-        # 6. 底部状态 + 高级设置入口
+        # 2. 底部状态 + 高级设置入口
         footer = QWidget()
         fl = QVBoxLayout(footer)
         fl.setContentsMargins(12, 8, 12, 12); fl.setSpacing(4)
@@ -861,14 +835,82 @@ class MainWin(QMainWindow):
         self._transcript.setReadOnly(False)
         self._transcript.setPlaceholderText(
             "转录内容将在这里显示\n\n"
-            "点击左侧「开始录音识别」开始录音；\n"
-            "或点击右上角「🎬 文件」导入音视频。\n\n"
-            "在侧边栏选择模型、质量和录音模式。"
+            "点击下方「🎙 开始录音识别」开始录音；\n"
+            "或点击右上角「🎬 文件」导入音视频。"
         )
         card_l.addWidget(self._transcript)
         cl.addWidget(card)
         layout.addWidget(content)
 
+        # ── 底部工具栏（下拉选择器 + 录音按钮）──────────────────
+        layout.addWidget(self._make_divider())
+        toolbar = QWidget(); toolbar.setObjectName("bottomToolbar")
+        tbl = QHBoxLayout(toolbar)
+        tbl.setContentsMargins(20, 10, 16, 12); tbl.setSpacing(0)
+
+        def _tb_label(text):
+            l = QLabel(text); l.setObjectName("tbLabel"); return l
+
+        def _tb_combo():
+            c = QComboBox(); c.setObjectName("tbCombo"); return c
+
+        # MODEL 下拉
+        model_grp = QWidget()
+        mgl = QVBoxLayout(model_grp)
+        mgl.setContentsMargins(0, 0, 0, 0); mgl.setSpacing(5)
+        mgl.addWidget(_tb_label("模型"))
+        self._combo_model = _tb_combo()
+        for size in MODEL_SIZES:
+            base = MODEL_LABELS[size]
+            label = f"{base} ✓" if check_downloaded(size) else base
+            self._combo_model.addItem(label)
+        self._combo_model.setCurrentIndex(MODEL_SIZES.index(self._cfg["model_size"]))
+        self._combo_model.currentIndexChanged.connect(self._on_combo_model_changed)
+        mgl.addWidget(self._combo_model)
+        tbl.addWidget(model_grp)
+
+        tbl.addSpacing(12)
+
+        # QUALITY 下拉
+        qual_grp = QWidget()
+        qgl = QVBoxLayout(qual_grp)
+        qgl.setContentsMargins(0, 0, 0, 0); qgl.setSpacing(5)
+        qgl.addWidget(_tb_label("质量"))
+        self._combo_quality = _tb_combo()
+        for key in QUALITY_KEYS:
+            self._combo_quality.addItem(key)
+        self._combo_quality.setCurrentIndex(QUALITY_KEYS.index(self._cfg["quality_key"]))
+        self._combo_quality.currentIndexChanged.connect(self._on_combo_quality_changed)
+        qgl.addWidget(self._combo_quality)
+        tbl.addWidget(qual_grp)
+
+        tbl.addSpacing(12)
+
+        # MODE 下拉
+        self._mode_keys = ["batch", "realtime"]
+        mode_grp = QWidget()
+        mogl = QVBoxLayout(mode_grp)
+        mogl.setContentsMargins(0, 0, 0, 0); mogl.setSpacing(5)
+        mogl.addWidget(_tb_label("模式"))
+        self._combo_mode = _tb_combo()
+        for label in ["📼 整段", "⚡ 实时"]:
+            self._combo_mode.addItem(label)
+        cur_mode = self._cfg.get("mode", "batch")
+        self._combo_mode.setCurrentIndex(self._mode_keys.index(cur_mode))
+        self._combo_mode.currentIndexChanged.connect(self._on_combo_mode_changed)
+        mogl.addWidget(self._combo_mode)
+        tbl.addWidget(mode_grp)
+
+        # ── 弹性 + 录音按钮 ───────────────────────────────────
+        tbl.addStretch()
+        self._btn_record = QPushButton("🎙  开始录音识别")
+        self._btn_record.setObjectName("btnRecord")
+        self._btn_record.setFixedHeight(42)
+        self._btn_record.setFixedWidth(200)
+        self._btn_record.clicked.connect(self._toggle_record)
+        tbl.addWidget(self._btn_record)
+
+        layout.addWidget(toolbar)
         return main
 
     # ─── 侧边栏辅助 ───────────────────────────────────────
@@ -882,41 +924,32 @@ class MainWin(QMainWindow):
         d.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return d
 
-    # ─── 侧边栏事件 ───────────────────────────────────────
+    # ─── 工具栏下拉事件 ────────────────────────────────────
 
-    def _on_sidebar_model_changed(self, btn):
-        for size, b in self._model_btns.items():
-            if b is btn:
-                self._cfg["model_size"] = size
-                self._cfg["custom_path"] = None
-                break
+    def _on_combo_model_changed(self, index):
+        self._cfg["model_size"] = MODEL_SIZES[index]
+        self._cfg["custom_path"] = None
         self._update_status_bar()
 
-    def _on_sidebar_quality_changed(self, btn):
-        for key, b in self._quality_btns.items():
-            if b is btn:
-                self._cfg["quality_key"] = key
-                break
+    def _on_combo_quality_changed(self, index):
+        self._cfg["quality_key"] = QUALITY_KEYS[index]
         self._update_status_bar()
 
-    def _on_sidebar_mode_changed(self, btn):
-        for key, b in self._mode_btns.items():
-            if b is btn:
-                self._cfg["mode"] = key
-                break
+    def _on_combo_mode_changed(self, index):
+        self._cfg["mode"] = self._mode_keys[index]
         self._update_status_bar()
 
     def _update_sidebar_pills(self):
-        """更新模型 pill 的 ✓ 标记（下载状态）"""
-        for size, btn in self._model_btns.items():
+        """更新模型下拉的 ✓ 标记（下载状态变化后调用）"""
+        for i, size in enumerate(MODEL_SIZES):
             base = MODEL_LABELS[size]
-            btn.setText(f"{base} ✓" if check_downloaded(size) else base)
+            self._combo_model.setItemText(i, f"{base} ✓" if check_downloaded(size) else base)
 
     def _set_controls_enabled(self, enabled):
-        """录音期间禁用侧边栏选项"""
-        for b in self._model_btns.values():   b.setEnabled(enabled)
-        for b in self._quality_btns.values(): b.setEnabled(enabled)
-        for b in self._mode_btns.values():    b.setEnabled(enabled)
+        """录音期间禁用选择器"""
+        self._combo_model.setEnabled(enabled)
+        self._combo_quality.setEnabled(enabled)
+        self._combo_mode.setEnabled(enabled)
         self._btn_file.setEnabled(enabled)
 
     # ─── 设置 / 状态 ──────────────────────────────────────
