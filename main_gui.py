@@ -34,21 +34,18 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
     QLabel, QFileDialog, QMessageBox, QButtonGroup,
     QFrame, QSizePolicy, QMenuBar, QMenu, QStatusBar,
-    QCheckBox
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat, QColor, QAction, QFont
 from faster_whisper import WhisperModel
 
 # ── 路径 ─────────────────────────────────────────────────
-# 内置模型目录：打包后在 sys._MEIPASS 里（只读），开发时和脚本同目录
 if getattr(sys, "frozen", False):
     _BASE = sys._MEIPASS
 else:
     _BASE = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_MODEL_ROOT = os.path.join(_BASE, "whisper_models")
 
-# 用户模型目录：可写，用于下载新模型
 USER_MODEL_ROOT = os.path.expanduser(
     "~/Library/Application Support/飞飞转录/whisper_models"
 )
@@ -59,7 +56,12 @@ SILENCE_MIN_FRAMES = int(1.5 * RATE / CHUNK)
 CHUNK_MIN_FRAMES   = int(8  * RATE / CHUNK)
 CHUNK_MAX_FRAMES   = int(30 * RATE / CHUNK)
 
-MODEL_SIZES = ["tiny", "base", "small", "medium", "large-v3"]
+MODEL_SIZES  = ["tiny", "base", "small", "medium", "large-v3"]
+# 侧边栏 pill 显示标签（large-v3 缩短为 large）
+MODEL_LABELS = {
+    "tiny": "tiny", "base": "base", "small": "small",
+    "medium": "medium", "large-v3": "large",
+}
 MODEL_HINTS = {
     "tiny": "75 MB", "base": "145 MB", "small": "483 MB",
     "medium": "1.5 GB", "large-v3": "3.1 GB",
@@ -91,125 +93,214 @@ QUALITY_HINTS = {
     QUALITY_KEYS[2]: "float32 · beam 10 · 准（较慢）",
 }
 
+# ── WorkBuddy 色彩 Token ──────────────────────────────────
+COLORS = {
+    "bg_primary":       "#000000",
+    "bg_secondary":     "#1c1c1e",
+    "bg_card":          "#1a1a1a",
+    "bg_hover":         "#2a2a2a",
+    "border_default":   "#2e2e33",
+    "text_primary":     "#e5e5e5",
+    "text_secondary":   "#a3a3a3",
+    "text_tertiary":    "#7c7c82",
+    "accent_blue":      "#60a5fa",
+    "accent_green":     "#4ade80",
+    "accent_red":       "#f87171",
+    "accent_yellow":    "#fbbf24",
+    "accent_purple":    "#8b7dff",
+}
+
 # ── 样式表 ────────────────────────────────────────────────
 STYLE = """
-* { font-family: "PingFang SC", "Helvetica Neue"; font-size: 13px;
-    color: #1C1C1E; outline: none; }
-QMainWindow, QDialog, #central { background: #F2F2F7; }
+/* ── 全局 ─────────────────────────────────── */
+* {
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB",
+                 "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+    color: #e5e5e5;
+    outline: none;
+}
+QMainWindow, QDialog { background: #000000; }
 
-QMenuBar { background: #F2F2F7; border-bottom: 1px solid #E5E5EA; padding: 2px 4px; }
-QMenuBar::item { padding: 4px 10px; border-radius: 6px; }
-QMenuBar::item:selected { background: #E5E5EA; }
-QMenu { background: white; border: 1px solid #E5E5EA; border-radius: 8px; padding: 4px; }
-QMenu::item { padding: 6px 20px; border-radius: 4px; }
-QMenu::item:selected { background: #007AFF; color: white; }
-QMenu::separator { height: 1px; background: #E5E5EA; margin: 4px 8px; }
+/* ── 菜单栏 ──────────────────────────────── */
+QMenuBar {
+    background: #1c1c1e;
+    border-bottom: 1px solid #2e2e33;
+    padding: 2px 4px;
+}
+QMenuBar::item { padding: 4px 10px; border-radius: 6px; color: #a3a3a3; }
+QMenuBar::item:selected { background: #2a2a2a; color: #e5e5e5; }
+QMenu {
+    background: #1a1a1a;
+    border: 1px solid #2e2e33;
+    border-radius: 10px;
+    padding: 4px;
+}
+QMenu::item { padding: 7px 20px; border-radius: 6px; color: #e5e5e5; }
+QMenu::item:selected { background: #2a2a2a; }
+QMenu::separator { height: 1px; background: #2e2e33; margin: 4px 8px; }
 
-#card { background: white; border-radius: 14px; border: 1px solid #E5E5EA; }
-#section { background: white; border-radius: 10px; border: 1px solid #E5E5EA; }
-#titleLabel { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
-#subtitleLabel { font-size: 12px; color: #8E8E93; }
-#sectionTitle { font-size: 12px; font-weight: 600; color: #8E8E93; letter-spacing: 0.3px; }
+/* ── 侧边栏 ──────────────────────────────── */
+#sidebar {
+    background: #1c1c1e;
+    border-right: 1px solid #2e2e33;
+    min-width: 220px; max-width: 220px;
+}
+#sidebarBrand {
+    font-family: "Poppins", -apple-system, sans-serif;
+    font-size: 16px; font-weight: 600;
+    color: #e5e5e5;
+}
+#sectionTitle {
+    font-size: 11px; font-weight: 600;
+    color: #7c7c82;
+    letter-spacing: 0.06em;
+    padding: 12px 12px 4px;
+}
+#sidebarFooterLabel {
+    font-size: 12px;
+    color: #7c7c82;
+}
+#btnAdvanced {
+    background: transparent;
+    border: none;
+    color: #7c7c82;
+    font-size: 11px;
+    text-align: left;
+    padding: 0;
+}
+#btnAdvanced:hover { color: #a3a3a3; }
 
+/* ── Pill 按钮 ───────────────────────────── */
 #pillBtn {
-    background: #F2F2F7; border: 1.5px solid #D1D1D6;
-    border-radius: 8px; padding: 5px 14px; font-size: 13px;
-    color: #3C3C43; min-width: 60px;
+    background: transparent;
+    border: 1px solid #2e2e33;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: #7c7c82;
 }
-#pillBtn:checked { background: #007AFF; border-color: #007AFF; color: white; font-weight: 600; }
-#pillBtn:hover:!checked { border-color: #007AFF; color: #007AFF; }
+#pillBtn:checked {
+    background: rgba(96,165,250,0.15);
+    border-color: #60a5fa;
+    color: #60a5fa;
+    font-weight: 600;
+}
+#pillBtn:hover:!checked { border-color: #3f3f46; color: #a3a3a3; }
+#pillBtn:disabled { color: #555558; border-color: #252525; }
 
-#pillBtnSpeed, #pillBtnBalance, #pillBtnQuality {
-    background: #F2F2F7; border: 1.5px solid #D1D1D6;
-    border-radius: 8px; padding: 5px 16px; font-size: 13px;
-    color: #3C3C43; min-width: 80px;
-}
-#pillBtnSpeed:checked   { background: #34C759; border-color: #34C759; color: white; font-weight: 600; }
-#pillBtnBalance:checked { background: #007AFF; border-color: #007AFF; color: white; font-weight: 600; }
-#pillBtnQuality:checked { background: #FF9500; border-color: #FF9500; color: white; font-weight: 600; }
-#pillBtnSpeed:hover:!checked, #pillBtnBalance:hover:!checked,
-#pillBtnQuality:hover:!checked { border-color: #007AFF; color: #007AFF; }
-
-/* 设置页复选框 */
-QCheckBox { font-size: 13px; color: #1C1C1E; spacing: 8px; }
-QCheckBox::indicator {
-    width: 18px; height: 18px; border-radius: 5px;
-    border: 1.5px solid #D1D1D6; background: white;
-}
-QCheckBox::indicator:checked {
-    background: #007AFF; border-color: #007AFF;
-    image: url("data:image/svg+xml,<svg/>");  /* Qt 会忽略无效 url，用颜色填充即可 */
-}
-QCheckBox::indicator:hover { border-color: #007AFF; }
-
-#btnPrimary {
-    background: #007AFF; color: white; border: none;
-    border-radius: 10px; padding: 10px 0; font-size: 14px; font-weight: 500;
-}
-#btnPrimary:hover { background: #0062CC; }
-#btnPrimary:pressed { background: #004FA3; }
+/* ── 主 CTA：录音按钮 ─────────────────────── */
 #btnRecord {
-    background: #FF3B30; color: white; border: none;
-    border-radius: 10px; padding: 10px 0; font-size: 14px; font-weight: 500;
+    background: #60a5fa;
+    color: #000000;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 0;
+    font-size: 14px; font-weight: 600;
 }
-#btnRecord:hover { background: #D63028; }
-#btnSecondary {
-    background: white; color: #007AFF; border: 1.5px solid #C7D8F5;
-    border-radius: 10px; padding: 10px 0; font-size: 14px;
+#btnRecord:hover { background: #93c5fd; }
+#btnRecord:disabled { background: #1e1e20; color: #555558; }
+#btnRecording {
+    background: rgba(248,113,113,0.15);
+    color: #f87171;
+    border: 1px solid #f87171;
+    border-radius: 10px;
+    padding: 10px 0;
+    font-size: 14px; font-weight: 600;
 }
-#btnSecondary:hover { background: #F0F7FF; }
-#btnSecondary:pressed { background: #E0EEFF; }
-#btnAction {
-    background: white; color: #007AFF; border: 1px solid #C7D8F5;
-    border-radius: 7px; padding: 5px 14px; font-size: 12px;
-}
-#btnAction:hover { background: #F0F7FF; }
-#btnAction:disabled { color: #C7C7CC; border-color: #E5E5EA; }
-#btnDanger {
-    background: white; color: #FF3B30; border: 1px solid #FFD0CE;
-    border-radius: 7px; padding: 5px 14px; font-size: 12px;
-}
-#btnDanger:hover { background: #FFF3F2; }
-#btnClose {
-    background: #007AFF; color: white; border: none;
-    border-radius: 8px; padding: 8px 28px; font-size: 13px; font-weight: 500;
-}
-#btnClose:hover { background: #0062CC; }
+#btnRecording:hover { background: rgba(248,113,113,0.25); }
 
-#statusOk    { color: #34C759; font-size: 12px; }
-#statusError { color: #FF3B30; font-size: 12px; }
-#statusWarn  { color: #FF9500; font-size: 12px; }
-#pathLabel   { color: #8E8E93; font-size: 12px; }
+/* ── 主内容区 ─────────────────────────────── */
+#mainArea { background: #000000; }
+#topBar {
+    background: #000000;
+    border-bottom: 1px solid #2e2e33;
+}
+#topBarTitle { font-size: 14px; font-weight: 600; color: #e5e5e5; }
 
-/* 转录文本区 */
+/* ── 转录卡片 ─────────────────────────────── */
+#transcriptCard {
+    background: #1a1a1a;
+    border: 1px solid #2e2e33;
+    border-radius: 12px;
+}
 #transcript {
-    background: white; border: 1.5px solid #E5E5EA; border-radius: 12px;
-    padding: 20px; selection-background-color: #CCE4FF;
+    background: transparent;
+    border: none;
+    color: #e5e5e5;
+    selection-background-color: rgba(96,165,250,0.25);
 }
-#transcript:focus { border-color: #007AFF; }
 
-QStatusBar { background: #F2F2F7; border-top: 1px solid #E5E5EA; font-size: 12px; color: #8E8E93; }
+/* ── 操作按钮（次要）─────────────────────── */
+#btnAction {
+    background: #1a1a1a;
+    color: #a3a3a3;
+    border: 1px solid #2e2e33;
+    border-radius: 8px;
+    padding: 5px 14px;
+    font-size: 12px;
+}
+#btnAction:hover { background: #2a2a2a; color: #e5e5e5; border-color: #3f3f46; }
+#btnAction:disabled { color: #555558; border-color: #1e1e20; background: #111111; }
+
+/* 危险操作按钮 */
+#btnActionDanger {
+    background: transparent;
+    color: #f87171;
+    border: 1px solid rgba(248,113,113,0.3);
+    border-radius: 8px;
+    padding: 5px 14px;
+    font-size: 12px;
+}
+#btnActionDanger:hover { background: rgba(248,113,113,0.1); border-color: #f87171; }
+
+/* ── 状态栏 ──────────────────────────────── */
+QStatusBar {
+    background: #1c1c1e;
+    border-top: 1px solid #2e2e33;
+    font-size: 12px;
+    color: #7c7c82;
+}
 QStatusBar::item { border: none; }
 
+/* ── 滚动条 ──────────────────────────────── */
 QScrollBar:vertical { background: transparent; width: 6px; margin: 4px 2px; }
-QScrollBar::handle:vertical { background: #C7C7CC; border-radius: 3px; min-height: 30px; }
+QScrollBar::handle:vertical {
+    background: rgba(255,255,255,0.12);
+    border-radius: 3px; min-height: 30px;
+}
+QScrollBar::handle:vertical:hover { background: rgba(255,255,255,0.2); }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-#sep { background: #F2F2F7; max-height: 1px; min-height: 1px; }
+
+/* ── 对话框 ──────────────────────────────── */
+QDialog { background: #000000; }
+#dialogCard {
+    background: #1a1a1a;
+    border: 1px solid #2e2e33;
+    border-radius: 12px;
+}
+#pathLabel  { color: #7c7c82; font-size: 12px; }
+#statusOk   { color: #4ade80; font-size: 12px; }
+#statusError { color: #f87171; font-size: 12px; }
+#statusWarn  { color: #fbbf24; font-size: 12px; }
+
+/* ── 分割线 ──────────────────────────────── */
+#divider { background: #2e2e33; max-height: 1px; min-height: 1px; }
 """
 
 # ── 文本格式 ──────────────────────────────────────────────
 def _fmt_label():
-    """分段标签：小号灰字"""
+    """分段标签：WorkBuddy text-tertiary"""
     f = QTextCharFormat()
-    f.setForeground(QColor("#B0B0B8"))
+    f.setForeground(QColor("#7c7c82"))
     f.setFontPointSize(11)
     return f
 
 def _fmt_body():
-    """正文：标准黑字，稍大"""
+    """正文：WorkBuddy text-primary"""
     f = QTextCharFormat()
-    f.setForeground(QColor("#1C1C1E"))
+    f.setForeground(QColor("#e5e5e5"))
     f.setFontPointSize(15)
     return f
 
@@ -243,7 +334,7 @@ def get_model_root(size):
         return USER_MODEL_ROOT
     if _model_complete(BUNDLED_MODEL_ROOT, size):
         return BUNDLED_MODEL_ROOT
-    return USER_MODEL_ROOT   # 模型不存在时返回可写目录，让 WhisperModel 去下载
+    return USER_MODEL_ROOT
 
 def dl_root(model_id):
     """线程内通用：model_id 是已知尺寸名则查找对应目录，否则（自定义路径）用用户目录"""
@@ -340,7 +431,7 @@ class TranscribeWorker(QThread):
 
 
 class SrtThread(QThread):
-    result = pyqtSignal(str)   # 保存路径
+    result = pyqtSignal(str)
     end    = pyqtSignal()
     def __init__(self, path, model, preset):
         super().__init__()
@@ -382,7 +473,7 @@ class SrtThread(QThread):
 class FullTranscribeThread(QThread):
     """录完整体转：对完整 WAV 做一次性识别，逐句流式 emit"""
     segment = pyqtSignal(str)
-    done    = pyqtSignal(str)    # 携带 wav_path 供清理
+    done    = pyqtSignal(str)
     error   = pyqtSignal(str)
 
     def __init__(self, wav_path, model, preset):
@@ -428,102 +519,85 @@ class FullTranscribeThread(QThread):
             self.done.emit(self.wav_path)
 
 
-# ── 设置对话框 ────────────────────────────────────────────
+# ── 设置对话框（简化版：只保留模型管理）────────────────────
 class SettingsDialog(QDialog):
     changed = pyqtSignal()
 
     def __init__(self, parent, cfg):
         super().__init__(parent)
         self.cfg = cfg
-        self.setWindowTitle("偏好设置")
-        self.setModal(True); self.setFixedWidth(500)
+        self.setWindowTitle("模型管理")
+        self.setModal(True); self.setFixedWidth(440)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self._build_ui(); self._refresh_status()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20); layout.setSpacing(14)
+        layout.setContentsMargins(24, 20, 24, 20); layout.setSpacing(16)
 
-        # 模型
-        layout.addWidget(self._section_label("模型"))
-        model_sec = QFrame(); model_sec.setObjectName("section")
-        ml = QVBoxLayout(model_sec); ml.setContentsMargins(14,12,14,12); ml.setSpacing(10)
+        # 对话框标题
+        title = QLabel("模型管理"); title.setObjectName("topBarTitle")
+        layout.addWidget(title)
 
-        row_pills = QHBoxLayout(); row_pills.setSpacing(6)
+        # 模型卡片
+        card = QFrame(); card.setObjectName("dialogCard")
+        cl = QVBoxLayout(card); cl.setContentsMargins(16, 14, 16, 14); cl.setSpacing(10)
+
+        # 区段标题
+        lbl_sel = QLabel("选择模型"); lbl_sel.setObjectName("sectionTitle")
+        lbl_sel.setContentsMargins(0, 0, 0, 0)
+        cl.addWidget(lbl_sel)
+
+        # 模型 pill 按钮组（两行）
         self._model_group = QButtonGroup(self); self._model_group.setExclusive(True)
         self._model_btns  = {}
-        for size in MODEL_SIZES:
-            b = QPushButton(size); b.setObjectName("pillBtn")
-            b.setCheckable(True); b.setFixedHeight(30)
-            b.clicked.connect(self._on_model_changed)
-            self._model_group.addButton(b)
-            self._model_btns[size] = b; row_pills.addWidget(b)
+        for sizes_row in [["tiny", "base", "small"], ["medium", "large-v3"]]:
+            row = QHBoxLayout(); row.setSpacing(4)
+            for size in sizes_row:
+                b = QPushButton(MODEL_LABELS[size]); b.setObjectName("pillBtn")
+                b.setCheckable(True); b.clicked.connect(self._on_model_changed)
+                self._model_group.addButton(b)
+                self._model_btns[size] = b; row.addWidget(b)
+            row.addStretch(); cl.addLayout(row)
         self._model_btns[self.cfg["model_size"]].setChecked(True)
-        row_pills.addStretch(); ml.addLayout(row_pills)
 
-        row_dl = QHBoxLayout(); row_dl.setSpacing(8)
-        self._lbl_model_status = QLabel(); row_dl.addWidget(self._lbl_model_status)
-        row_dl.addStretch()
-        self._btn_download = QPushButton("☁ 下载"); self._btn_download.setObjectName("btnAction")
-        self._btn_download.setFixedHeight(28); self._btn_download.clicked.connect(self._download_model)
-        self._btn_import = QPushButton("📂 本地导入"); self._btn_import.setObjectName("btnAction")
-        self._btn_import.setFixedHeight(28); self._btn_import.clicked.connect(self._import_model)
-        self._btn_clear = QPushButton("清除路径"); self._btn_clear.setObjectName("btnDanger")
-        self._btn_clear.setFixedHeight(28); self._btn_clear.clicked.connect(self._clear_path)
+        # 状态行
+        row_status = QHBoxLayout(); row_status.setSpacing(8)
+        self._lbl_model_status = QLabel()
+        row_status.addWidget(self._lbl_model_status); row_status.addStretch()
+        cl.addLayout(row_status)
+
+        # 操作按钮行
+        row_dl = QHBoxLayout(); row_dl.setSpacing(6)
+        self._btn_download = QPushButton("☁  下载模型"); self._btn_download.setObjectName("btnAction")
+        self._btn_download.setFixedHeight(30); self._btn_download.clicked.connect(self._download_model)
+        self._btn_import = QPushButton("📂  本地导入"); self._btn_import.setObjectName("btnAction")
+        self._btn_import.setFixedHeight(30); self._btn_import.clicked.connect(self._import_model)
+        self._btn_clear = QPushButton("清除路径"); self._btn_clear.setObjectName("btnActionDanger")
+        self._btn_clear.setFixedHeight(30); self._btn_clear.clicked.connect(self._clear_path)
         row_dl.addWidget(self._btn_download); row_dl.addWidget(self._btn_import)
-        row_dl.addWidget(self._btn_clear); ml.addLayout(row_dl)
+        row_dl.addWidget(self._btn_clear); row_dl.addStretch()
+        cl.addLayout(row_dl)
 
+        # 路径标签
         self._lbl_path = QLabel(); self._lbl_path.setObjectName("pathLabel")
-        self._lbl_path.setWordWrap(True); ml.addWidget(self._lbl_path)
-        layout.addWidget(model_sec)
+        self._lbl_path.setWordWrap(True); cl.addWidget(self._lbl_path)
 
-        # 识别质量
-        layout.addWidget(self._section_label("识别质量"))
-        q_sec = QFrame(); q_sec.setObjectName("section")
-        ql = QVBoxLayout(q_sec); ql.setContentsMargins(14,12,14,12); ql.setSpacing(8)
-        row_q = QHBoxLayout(); row_q.setSpacing(6)
-        self._quality_group = QButtonGroup(self); self._quality_group.setExclusive(True)
-        self._quality_btns  = {}
-        for key, obj in zip(QUALITY_KEYS, ["pillBtnSpeed","pillBtnBalance","pillBtnQuality"]):
-            b = QPushButton(key); b.setObjectName(obj)
-            b.setCheckable(True); b.setFixedHeight(30)
-            b.clicked.connect(self._on_quality_changed)
-            self._quality_group.addButton(b)
-            self._quality_btns[key] = b; row_q.addWidget(b)
-        self._quality_btns[self.cfg["quality_key"]].setChecked(True)
-        row_q.addStretch(); ql.addLayout(row_q)
-        self._lbl_quality_hint = QLabel(); self._lbl_quality_hint.setObjectName("subtitleLabel")
-        ql.addWidget(self._lbl_quality_hint); layout.addWidget(q_sec)
+        layout.addWidget(card)
 
-        # 录音模式
-        layout.addWidget(self._section_label("录音模式"))
-        mode_sec = QFrame(); mode_sec.setObjectName("section")
-        mo = QVBoxLayout(mode_sec); mo.setContentsMargins(14, 14, 14, 14); mo.setSpacing(6)
-        self._chk_realtime = QCheckBox("开启边录边转（实时分段识别）")
-        self._chk_realtime.setChecked(self.cfg.get("mode") == "realtime")
-        self._chk_realtime.toggled.connect(self._on_mode_toggled)
-        mo.addWidget(self._chk_realtime)
-        self._lbl_mode_hint = QLabel(); self._lbl_mode_hint.setObjectName("subtitleLabel")
-        mo.addWidget(self._lbl_mode_hint)
-        layout.addWidget(mode_sec)
-        self._on_mode_toggled(self._chk_realtime.isChecked())
+        # 完成按钮
+        row_done = QHBoxLayout(); row_done.addStretch()
+        btn_done = QPushButton("完成"); btn_done.setObjectName("btnRecord")
+        btn_done.setFixedSize(100, 34); btn_done.clicked.connect(self.accept)
+        row_done.addWidget(btn_done); layout.addLayout(row_done)
 
-        layout.addSpacing(4)
-        row_close = QHBoxLayout(); row_close.addStretch()
-        btn_close = QPushButton("完成"); btn_close.setObjectName("btnClose")
-        btn_close.setFixedHeight(34); btn_close.clicked.connect(self.accept)
-        row_close.addWidget(btn_close); layout.addLayout(row_close)
-
-        self._on_quality_changed(); self._update_path_ui()
-
-    def _section_label(self, text):
-        l = QLabel(text.upper()); l.setObjectName("sectionTitle"); return l
+        self._update_path_ui()
 
     def _refresh_status(self):
         self._update_model_pills()
         size = self.cfg["model_size"]
         if self.cfg.get("custom_path"):
-            self._set_model_status("✅ 本地模型", "statusOk")
+            self._set_model_status("📂 本地模型", "statusWarn")
         elif check_downloaded(size):
             self._set_model_status(f"✅ 已下载  {MODEL_HINTS[size]}", "statusOk")
         else:
@@ -536,33 +610,21 @@ class SettingsDialog(QDialog):
 
     def _update_model_pills(self):
         for size, btn in self._model_btns.items():
-            btn.setText(f"{size} ✓" if check_downloaded(size) else size)
+            base = MODEL_LABELS[size]
+            btn.setText(f"{base} ✓" if check_downloaded(size) else base)
 
     def _update_path_ui(self):
         p = self.cfg.get("custom_path")
         if p:
-            self._lbl_path.setText(f"路径：{p if len(p)<=55 else '…'+p[-52:]}")
+            self._lbl_path.setText(f"路径：{p if len(p) <= 55 else '…' + p[-52:]}")
             self._btn_clear.show()
         else:
             self._lbl_path.clear(); self._btn_clear.hide()
 
     def _on_model_changed(self):
-        self.cfg["model_size"] = next(s for s,b in self._model_btns.items() if b.isChecked())
+        self.cfg["model_size"] = next(s for s, b in self._model_btns.items() if b.isChecked())
         self.cfg["custom_path"] = None
         self._update_path_ui(); self._refresh_status()
-
-    def _on_quality_changed(self):
-        self.cfg["quality_key"] = next(k for k,b in self._quality_btns.items() if b.isChecked())
-        self._lbl_quality_hint.setText(QUALITY_HINTS.get(self.cfg["quality_key"], ""))
-        self.changed.emit()
-
-    def _on_mode_toggled(self, checked):
-        self.cfg["mode"] = "realtime" if checked else "batch"
-        self._lbl_mode_hint.setText(
-            "录音同时每段静音后自动识别，结果实时流式输出" if checked
-            else "默认模式：录完全部后统一识别，准确率更高"
-        )
-        self.changed.emit()
 
     def _download_model(self):
         size = self.cfg["model_size"]
@@ -576,7 +638,7 @@ class SettingsDialog(QDialog):
         self._dl.done.connect(self._on_download_done); self._dl.start()
 
     def _on_download_done(self, ok, msg):
-        self._btn_download.setEnabled(True); self._btn_download.setText("☁ 下载")
+        self._btn_download.setEnabled(True); self._btn_download.setText("☁  下载模型")
         p = self.parent()
         if p:
             if ok:  p.statusBar().showMessage(f"✅ 「{msg}」下载完成！", 4000)
@@ -586,7 +648,7 @@ class SettingsDialog(QDialog):
     def _import_model(self):
         path = QFileDialog.getExistingDirectory(self, "选择本地模型文件夹")
         if not path: return
-        if not any(f in os.listdir(path) for f in ["config.json","model.bin","tokenizer.json","vocabulary.txt"]):
+        if not any(f in os.listdir(path) for f in ["config.json", "model.bin", "tokenizer.json", "vocabulary.txt"]):
             QMessageBox.warning(self, "格式不符",
                 "所选文件夹不像 Whisper 模型目录。\n请选择含有 config.json / model.bin 等文件的文件夹。")
             return
@@ -603,17 +665,17 @@ class MainWin(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("飞飞转录")
-        self.resize(680, 600); self.setMinimumSize(560, 480)
+        self.resize(900, 640); self.setMinimumSize(720, 520)
 
         self._cfg = {
             "model_size":  "small",
             "quality_key": QUALITY_KEYS[1],
             "custom_path": None,
-            "mode":        "batch",      # 默认：录完整转；"realtime" = 边录边转
+            "mode":        "batch",
         }
         self._recording  = False
         self._rec_stream = None
-        self._rec_pa     = None   # 与 _rec_stream 配套的 PyAudio 实例
+        self._rec_pa     = None
         self._rec_frames = []
         self._chunk_no   = 0
         self._worker     = None
@@ -623,10 +685,14 @@ class MainWin(QMainWindow):
         self._blink_timer = QTimer(self)
         self._blink_timer.timeout.connect(self._update_record_btn)
 
-        self._build_ui(); self._update_status_bar()
+        self._build_ui()
+        self._update_sidebar_pills()
+        self._update_status_bar()
 
-    # ─── 界面 ─────────────────────────────────────────────
+    # ─── 界面构建 ─────────────────────────────────────────
+
     def _build_ui(self):
+        # 菜单栏（只保留文件菜单）
         mb = QMenuBar(self); self.setMenuBar(mb)
         file_menu = QMenu("文件", self)
         act_import = QAction("导入音视频…", self); act_import.setShortcut("Ctrl+O")
@@ -634,57 +700,14 @@ class MainWin(QMainWindow):
         act_quit = QAction("退出", self); act_quit.setShortcut("Ctrl+Q")
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_import); file_menu.addSeparator(); file_menu.addAction(act_quit)
-        settings_menu = QMenu("设置", self)
-        act_prefs = QAction("偏好设置…", self); act_prefs.setShortcut("Ctrl+,")
-        act_prefs.triggered.connect(self._open_settings)
-        settings_menu.addAction(act_prefs)
-        mb.addMenu(file_menu); mb.addMenu(settings_menu)
+        mb.addMenu(file_menu)
 
-        central = QWidget(); central.setObjectName("central")
+        central = QWidget()
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(20, 16, 20, 16); root.setSpacing(12)
-
-        # 标题栏
-        header = QHBoxLayout()
-        title = QLabel("🐦 飞飞转录"); title.setObjectName("titleLabel")
-        sub   = QLabel("本地离线语音转录"); sub.setObjectName("subtitleLabel")
-        btn_settings = QPushButton("⚙ 设置"); btn_settings.setObjectName("btnAction")
-        btn_settings.setFixedHeight(28); btn_settings.clicked.connect(self._open_settings)
-        btn_clear = QPushButton("清空"); btn_clear.setObjectName("btnAction")
-        btn_clear.setFixedHeight(28); btn_clear.clicked.connect(self._clear_transcript)
-        vt = QVBoxLayout(); vt.setSpacing(2)
-        vt.addWidget(title); vt.addWidget(sub)
-        header.addLayout(vt); header.addStretch()
-        header.addWidget(btn_settings); header.addWidget(btn_clear)
-        root.addLayout(header)
-
-        # 操作按钮行
-        row = QHBoxLayout(); row.setSpacing(10)
-        self._btn_record = QPushButton("🎙  开始录音识别"); self._btn_record.setObjectName("btnPrimary")
-        self._btn_record.setFixedHeight(44)
-        self._btn_record.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._btn_record.clicked.connect(self._toggle_record)
-        self._btn_file = QPushButton("🎬  导入音视频"); self._btn_file.setObjectName("btnSecondary")
-        self._btn_file.setFixedHeight(44)
-        self._btn_file.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._btn_file.clicked.connect(self._select_file)
-        self._btn_copy = QPushButton("📋  复制"); self._btn_copy.setObjectName("btnSecondary")
-        self._btn_copy.setFixedSize(90, 44); self._btn_copy.clicked.connect(self._copy_text)
-        row.addWidget(self._btn_record); row.addWidget(self._btn_file); row.addWidget(self._btn_copy)
-        root.addLayout(row)
-
-        # 转录文本区（纯正文，无日志混入）
-        self._transcript = QTextEdit()
-        self._transcript.setObjectName("transcript")
-        self._transcript.setReadOnly(False)
-        self._transcript.setPlaceholderText(
-            "转录内容将在这里显示\n\n"
-            "录音时每段语音识别完成后实时追加；\n"
-            "导入音视频后逐句输出。\n\n"
-            "通过「⚙ 设置」选择模型和识别质量。"
-        )
-        root.addWidget(self._transcript)
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
+        root.addWidget(self._build_sidebar())
+        root.addWidget(self._build_main_area())
 
         # 状态栏
         sb = QStatusBar(); self.setStatusBar(sb)
@@ -694,22 +717,245 @@ class MainWin(QMainWindow):
         self._lbl_sb_sep2    = QLabel("·"); sb.addWidget(self._lbl_sb_sep2)
         self._lbl_sb_status  = QLabel(); sb.addWidget(self._lbl_sb_status)
 
-    # ─── 设置 / 状态栏 ────────────────────────────────────
+    def _build_sidebar(self):
+        sidebar = QWidget(); sidebar.setObjectName("sidebar")
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
+
+        # 1. 品牌头部
+        header = QWidget()
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(16, 16, 16, 16); hl.setSpacing(10)
+        logo = QLabel("🐦"); logo.setFixedSize(28, 28)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand = QLabel("飞飞转录"); brand.setObjectName("sidebarBrand")
+        hl.addWidget(logo); hl.addWidget(brand); hl.addStretch()
+        layout.addWidget(header)
+        layout.addWidget(self._make_divider())
+
+        # 2. 主 CTA：录音按钮
+        rec_wrap = QWidget()
+        rcl = QVBoxLayout(rec_wrap)
+        rcl.setContentsMargins(12, 12, 12, 10)
+        self._btn_record = QPushButton("🎙  开始录音识别")
+        self._btn_record.setObjectName("btnRecord")
+        self._btn_record.setFixedHeight(40)
+        self._btn_record.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._btn_record.clicked.connect(self._toggle_record)
+        rcl.addWidget(self._btn_record)
+        layout.addWidget(rec_wrap)
+        layout.addWidget(self._make_divider())
+
+        # 3. 模型选择
+        layout.addWidget(self._section_title("MODELS"))
+        model_wrap = QWidget()
+        mcl = QVBoxLayout(model_wrap)
+        mcl.setContentsMargins(12, 0, 12, 8); mcl.setSpacing(4)
+        self._model_group = QButtonGroup(self); self._model_group.setExclusive(True)
+        self._model_btns  = {}
+        for sizes_row in [["tiny", "base", "small"], ["medium", "large-v3"]]:
+            row = QHBoxLayout(); row.setSpacing(4)
+            for size in sizes_row:
+                b = QPushButton(MODEL_LABELS[size]); b.setObjectName("pillBtn")
+                b.setCheckable(True)
+                self._model_group.addButton(b)
+                self._model_btns[size] = b; row.addWidget(b)
+            row.addStretch(); mcl.addLayout(row)
+        self._model_btns[self._cfg["model_size"]].setChecked(True)
+        self._model_group.buttonClicked.connect(self._on_sidebar_model_changed)
+        layout.addWidget(model_wrap)
+
+        # 4. 质量选择
+        layout.addWidget(self._section_title("QUALITY"))
+        q_wrap = QWidget()
+        qcl = QHBoxLayout(q_wrap)
+        qcl.setContentsMargins(12, 0, 12, 8); qcl.setSpacing(4)
+        self._quality_group = QButtonGroup(self); self._quality_group.setExclusive(True)
+        self._quality_btns  = {}
+        # 侧边栏用短标签
+        quality_short = {
+            "⚡ 速度": "⚡速度",
+            "⚖ 均衡": "⚖均衡",
+            "🎯 质量": "🎯质量",
+        }
+        for key in QUALITY_KEYS:
+            b = QPushButton(quality_short[key]); b.setObjectName("pillBtn")
+            b.setCheckable(True)
+            self._quality_group.addButton(b)
+            self._quality_btns[key] = b; qcl.addWidget(b)
+        qcl.addStretch()
+        self._quality_btns[self._cfg["quality_key"]].setChecked(True)
+        self._quality_group.buttonClicked.connect(self._on_sidebar_quality_changed)
+        layout.addWidget(q_wrap)
+
+        # 5. 模式选择
+        layout.addWidget(self._section_title("MODE"))
+        mode_wrap = QWidget()
+        mocl = QHBoxLayout(mode_wrap)
+        mocl.setContentsMargins(12, 0, 12, 8); mocl.setSpacing(4)
+        self._mode_group = QButtonGroup(self); self._mode_group.setExclusive(True)
+        self._mode_btns  = {}
+        mode_labels = {"batch": "📼 整段", "realtime": "⚡ 实时"}
+        for key, label in mode_labels.items():
+            b = QPushButton(label); b.setObjectName("pillBtn")
+            b.setCheckable(True)
+            self._mode_group.addButton(b)
+            self._mode_btns[key] = b; mocl.addWidget(b)
+        mocl.addStretch()
+        self._mode_btns[self._cfg.get("mode", "batch")].setChecked(True)
+        self._mode_group.buttonClicked.connect(self._on_sidebar_mode_changed)
+        layout.addWidget(mode_wrap)
+
+        # 弹性空间
+        layout.addStretch()
+        layout.addWidget(self._make_divider())
+
+        # 6. 底部状态 + 高级设置入口
+        footer = QWidget()
+        fl = QVBoxLayout(footer)
+        fl.setContentsMargins(12, 8, 12, 12); fl.setSpacing(4)
+        self._lbl_sidebar_status = QLabel()
+        self._lbl_sidebar_status.setObjectName("sidebarFooterLabel")
+        fl.addWidget(self._lbl_sidebar_status)
+        btn_adv = QPushButton("⚙  高级 · 下载模型")
+        btn_adv.setObjectName("btnAdvanced")
+        btn_adv.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_adv.clicked.connect(self._open_settings)
+        fl.addWidget(btn_adv)
+        layout.addWidget(footer)
+
+        return sidebar
+
+    def _build_main_area(self):
+        main = QWidget(); main.setObjectName("mainArea")
+        layout = QVBoxLayout(main)
+        layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
+
+        # Top bar（固定 48px）
+        topbar = QWidget(); topbar.setObjectName("topBar")
+        topbar.setFixedHeight(48)
+        tbl = QHBoxLayout(topbar)
+        tbl.setContentsMargins(20, 0, 16, 0); tbl.setSpacing(8)
+        title = QLabel("转录结果"); title.setObjectName("topBarTitle")
+        tbl.addWidget(title); tbl.addStretch()
+
+        self._btn_clear = QPushButton("清空"); self._btn_clear.setObjectName("btnAction")
+        self._btn_clear.setFixedHeight(30); self._btn_clear.clicked.connect(self._clear_transcript)
+        self._btn_copy = QPushButton("📋  复制"); self._btn_copy.setObjectName("btnAction")
+        self._btn_copy.setFixedHeight(30); self._btn_copy.clicked.connect(self._copy_text)
+        self._btn_file = QPushButton("🎬  文件"); self._btn_file.setObjectName("btnAction")
+        self._btn_file.setFixedHeight(30); self._btn_file.clicked.connect(self._select_file)
+        tbl.addWidget(self._btn_clear); tbl.addWidget(self._btn_copy); tbl.addWidget(self._btn_file)
+        layout.addWidget(topbar)
+        layout.addWidget(self._make_divider())
+
+        # 转录卡片（带外边距）
+        content = QWidget()
+        cl = QVBoxLayout(content)
+        cl.setContentsMargins(16, 16, 16, 16)
+        card = QFrame(); card.setObjectName("transcriptCard")
+        card_l = QVBoxLayout(card)
+        card_l.setContentsMargins(16, 16, 16, 16)
+        self._transcript = QTextEdit()
+        self._transcript.setObjectName("transcript")
+        self._transcript.setReadOnly(False)
+        self._transcript.setPlaceholderText(
+            "转录内容将在这里显示\n\n"
+            "点击左侧「开始录音识别」开始录音；\n"
+            "或点击右上角「🎬 文件」导入音视频。\n\n"
+            "在侧边栏选择模型、质量和录音模式。"
+        )
+        card_l.addWidget(self._transcript)
+        cl.addWidget(card)
+        layout.addWidget(content)
+
+        return main
+
+    # ─── 侧边栏辅助 ───────────────────────────────────────
+
+    def _section_title(self, text):
+        l = QLabel(text); l.setObjectName("sectionTitle"); return l
+
+    def _make_divider(self):
+        d = QWidget(); d.setObjectName("divider")
+        d.setFixedHeight(1)
+        d.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return d
+
+    # ─── 侧边栏事件 ───────────────────────────────────────
+
+    def _on_sidebar_model_changed(self, btn):
+        for size, b in self._model_btns.items():
+            if b is btn:
+                self._cfg["model_size"] = size
+                self._cfg["custom_path"] = None
+                break
+        self._update_status_bar()
+
+    def _on_sidebar_quality_changed(self, btn):
+        for key, b in self._quality_btns.items():
+            if b is btn:
+                self._cfg["quality_key"] = key
+                break
+        self._update_status_bar()
+
+    def _on_sidebar_mode_changed(self, btn):
+        for key, b in self._mode_btns.items():
+            if b is btn:
+                self._cfg["mode"] = key
+                break
+        self._update_status_bar()
+
+    def _update_sidebar_pills(self):
+        """更新模型 pill 的 ✓ 标记（下载状态）"""
+        for size, btn in self._model_btns.items():
+            base = MODEL_LABELS[size]
+            btn.setText(f"{base} ✓" if check_downloaded(size) else base)
+
+    def _set_controls_enabled(self, enabled):
+        """录音期间禁用侧边栏选项"""
+        for b in self._model_btns.values():   b.setEnabled(enabled)
+        for b in self._quality_btns.values(): b.setEnabled(enabled)
+        for b in self._mode_btns.values():    b.setEnabled(enabled)
+        self._btn_file.setEnabled(enabled)
+
+    # ─── 设置 / 状态 ──────────────────────────────────────
+
     def _open_settings(self):
         dlg = SettingsDialog(self, self._cfg)
         dlg.changed.connect(self._update_status_bar)
-        dlg.exec(); self._update_status_bar()
+        dlg.exec()
+        # 下载完成后刷新 pill 标记 + 状态
+        self._update_sidebar_pills()
+        self._update_status_bar()
 
     def _update_status_bar(self):
         size = self._cfg["model_size"]
         ok   = bool(self._cfg.get("custom_path")) or check_downloaded(size)
-        mode_label = "⚡ 边录边转" if self._cfg.get("mode") == "realtime" else "📼 录完整转"
+        mode_label = "⚡ 实时" if self._cfg.get("mode") == "realtime" else "📼 整段"
         self._lbl_sb_model.setText(f"模型：{size}{'  ✓' if check_downloaded(size) else ''}")
         self._lbl_sb_quality.setText(f"质量：{self._cfg['quality_key']}")
-        self._lbl_sb_sep2.setText("·")
-        if self._cfg.get("custom_path"):  self._lbl_sb_status.setText(f"本地模型  ·  {mode_label}")
-        elif ok:                          self._lbl_sb_status.setText(f"✅ 就绪  ·  {mode_label}")
-        else:                             self._lbl_sb_status.setText(f"❌ 未下载  ·  {mode_label}")
+        if self._cfg.get("custom_path"):
+            self._lbl_sb_status.setText(f"本地模型  ·  {mode_label}")
+        elif ok:
+            self._lbl_sb_status.setText(f"✅ 就绪  ·  {mode_label}")
+        else:
+            self._lbl_sb_status.setText(f"❌ 未下载  ·  {mode_label}")
+        # 同步侧边栏底部状态
+        self._update_sidebar_footer()
+
+    def _update_sidebar_footer(self):
+        size = self._cfg["model_size"]
+        if self._cfg.get("custom_path"):
+            self._lbl_sidebar_status.setText("📂 使用本地模型")
+            self._lbl_sidebar_status.setObjectName("statusWarn")
+        elif check_downloaded(size):
+            self._lbl_sidebar_status.setText(f"✅ {size} 模型已就绪")
+            self._lbl_sidebar_status.setObjectName("statusOk")
+        else:
+            self._lbl_sidebar_status.setText(f"❌ 模型未下载")
+            self._lbl_sidebar_status.setObjectName("statusError")
+        polish(self._lbl_sidebar_status)
 
     # ─── 当前参数 ─────────────────────────────────────────
     def _get_model(self):
@@ -725,6 +971,7 @@ class MainWin(QMainWindow):
     def _start_recording(self):
         self._recording = True
         self._rec_frames = []; self._chunk_no = 0; self._last_text = ""
+        self._set_controls_enabled(False)
 
         self._rec_pa = pyaudio.PyAudio()
         self._rec_stream = self._rec_pa.open(
@@ -732,10 +979,9 @@ class MainWin(QMainWindow):
             input=True, frames_per_buffer=CHUNK
         )
         self._blink_timer.start(500)
-        self._btn_record.setObjectName("btnRecord"); polish(self._btn_record)
+        self._btn_record.setObjectName("btnRecording"); polish(self._btn_record)
 
         if self._cfg["mode"] == "realtime":
-            # 边录边转：启动持久化 worker，静音自动切段
             self._worker = TranscribeWorker(self._get_model(), self._get_preset())
             self._worker.ready.connect(lambda: self.statusBar().showMessage("模型已就绪，开始识别…", 3000))
             self._worker.segment.connect(self._on_segment)
@@ -747,7 +993,6 @@ class MainWin(QMainWindow):
             self._btn_record.setText("⏹  ● 录音中  0s / 最多 30s")
             self.statusBar().showMessage("模型加载中，请稍候…")
         else:
-            # 录完整转：只录音，停止后统一转录
             self._btn_record.setText("⏹  ● 录音中  0s")
             self.statusBar().showMessage("录音中，停止后开始转录…")
 
@@ -759,20 +1004,19 @@ class MainWin(QMainWindow):
         if self._rec_pa:
             self._rec_pa.terminate(); self._rec_pa = None
 
-        self._btn_record.setObjectName("btnPrimary"); polish(self._btn_record)
+        self._btn_record.setObjectName("btnRecord"); polish(self._btn_record)
         self._btn_record.setText("🎙  开始录音识别")
+        self._set_controls_enabled(True)
 
         if self._cfg["mode"] == "realtime":
             if self._rec_frames: self._flush_chunk(final=True)
             self._worker.stop()
             self.statusBar().showMessage("录音结束，等待最后识别完成…")
         else:
-            # 批量模式：把全部帧保存为一个 WAV 整体提交
             if not self._rec_frames:
                 self.statusBar().showMessage("没有录到音频", 3000); return
             frames = self._rec_frames[:]; self._rec_frames = []
             duration = len(frames) * CHUNK / RATE
-            # 检查录音电平，确认麦克风权限是否正常
             raw = b"".join(frames)
             samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
             rms = float(np.sqrt(np.mean(samples ** 2))) if len(samples) else 0
@@ -824,36 +1068,25 @@ class MainWin(QMainWindow):
         tmp.close(); save_wav(frames, tmp.name)
         duration = len(frames) * CHUNK / RATE
         trigger  = "尾段" if final else ("静音切断" if duration < 28 else "超时切断")
-
-        # 在转录区插入分段标签
         self._insert_chunk_label(n, duration, trigger)
         self.statusBar().showMessage(f"识别第 {n} 段（{duration:.1f}s）…")
-
         ctx = self._last_text[-80:] if self._last_text else None
         self._worker.submit(tmp.name, n, ctx_prompt=ctx)
 
     def _insert_chunk_label(self, chunk_no, duration, trigger):
-        """在转录区插入浅灰分段标签，与正文视觉分层"""
         cur = self._transcript.textCursor()
         cur.movePosition(QTextCursor.MoveOperation.End)
-
         if chunk_no > 1:
-            # 段落间距：插入带 topMargin 的空块
             spacer_blk = QTextBlockFormat()
             spacer_blk.setTopMargin(18)
             cur.insertBlock(spacer_blk)
-            cur.insertText("")   # 确保空行存在
-
-        # 标签行
+            cur.insertText("")
         cur.insertBlock(_blk_label())
         cur.insertText(f"第 {chunk_no} 段  ·  {duration:.0f}s  ·  {trigger}", _fmt_label())
-
-        # 正文起始行
         cur.insertBlock(_blk_body())
         self._transcript.setTextCursor(cur)
 
     def _on_segment(self, _no, text):
-        """流式追加识别句子到正文段落"""
         self._last_text = text
         cur = self._transcript.textCursor()
         cur.movePosition(QTextCursor.MoveOperation.End)
@@ -863,7 +1096,6 @@ class MainWin(QMainWindow):
         self._transcript.ensureCursorVisible()
 
     def _on_segment_batch(self, text):
-        """批量模式逐句流式输出"""
         self._last_text = text
         cur = self._transcript.textCursor()
         cur.movePosition(QTextCursor.MoveOperation.End)
@@ -873,7 +1105,6 @@ class MainWin(QMainWindow):
         self._transcript.ensureCursorVisible()
 
     def _on_transcribe_error(self, msg):
-        """转录失败时弹窗 + 状态栏双重提示，确保用户能看到"""
         log.error("Transcribe error: %s", msg)
         self.statusBar().showMessage(f"❌ 转录失败：{msg}", 0)
         QMessageBox.critical(self, "转录失败", f"{msg}\n\n详细日志：~/Library/Logs/飞飞转录/app.log")
@@ -884,8 +1115,6 @@ class MainWin(QMainWindow):
         self.statusBar().showMessage("✅ 转录完成，模型已释放", 4000)
 
     def _cleanup_full_th(self):
-        # finished 信号触发时线程已退出 run()，直接解除引用即可；
-        # 不在此处调用 wait()，避免在 finished 槽里阻塞主线程引发死锁
         if self._full_th:
             self._full_th.deleteLater(); self._full_th = None
 
@@ -900,7 +1129,7 @@ class MainWin(QMainWindow):
         else:
             self._btn_record.setText(f"⏹  ● 录音中  {sec}s")
 
-    # ─── 导入字幕 ─────────────────────────────────────────
+    # ─── 导入音视频 ───────────────────────────────────────
     def _select_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "选择音视频文件", "",
@@ -917,11 +1146,10 @@ class MainWin(QMainWindow):
             self.statusBar().showMessage(f"❌ 生成失败：{result[6:]}", 0)
         else:
             self.statusBar().showMessage(f"✅ 字幕已保存：{result}", 6000)
-            # 在转录区追加完成提示
             cur = self._transcript.textCursor()
             cur.movePosition(QTextCursor.MoveOperation.End)
             tip_fmt = QTextCharFormat()
-            tip_fmt.setForeground(QColor("#34C759")); tip_fmt.setFontPointSize(12)
+            tip_fmt.setForeground(QColor("#4ade80")); tip_fmt.setFontPointSize(12)
             cur.insertBlock(_blk_label())
             cur.insertText(f"✅ 字幕已保存：{result}", tip_fmt)
             cur.insertBlock(_blk_body())
@@ -958,10 +1186,7 @@ class MainWin(QMainWindow):
 
 # ── 入口 ──────────────────────────────────────────────────
 if __name__ == "__main__":
-    # macOS frozen .app：必须最先调用，防止 ctranslate2/OpenMP 内部 spawn
-    # 子进程时重新执行 .app 可执行文件，导致弹出第二个窗口
     multiprocessing.freeze_support()
-
     os.makedirs(USER_MODEL_ROOT, exist_ok=True)
     app = QApplication(sys.argv)
     app.setStyleSheet(STYLE)
