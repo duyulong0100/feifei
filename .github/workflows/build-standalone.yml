@@ -9,7 +9,7 @@ on:
 jobs:
   # ── macOS DMG ─────────────────────────────────────────────────────────────
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-13   # 指定 macOS 13，避免 macos-latest(14+) 上编译的 av 依赖 macOS 14 新 API
     steps:
       - uses: actions/checkout@v4
 

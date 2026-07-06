@@ -32,9 +32,7 @@ hiddenimports = [
     "huggingface_hub",
     "huggingface_hub.file_download",
     "huggingface_hub._commit_api",
-    # 注意：不包含 av（PyAV），因为：
-    # 1. faster_whisper 处理 WAV 不需要它
-    # 2. PyAV 的 libavdevice 依赖 macOS 14+ 新符号，会在旧系统崩溃
+    "av",
 ]
 
 # Logo
@@ -78,6 +76,15 @@ try:
 except Exception:
     pass
 
+# av（faster_whisper 无条件 import av，必须打包）
+try:
+    tmp = collect_all("av")
+    datas    += tmp[0]
+    binaries += tmp[1]
+    hiddenimports += tmp[2]
+except Exception:
+    pass
+
 # ── Analysis ────────────────────────────────────────────
 a = Analysis(
     [os.path.join(_here, "main_gui.py")],
@@ -92,7 +99,6 @@ a = Analysis(
         "torch", "torchaudio", "torchvision",
         "matplotlib", "scipy", "PIL",
         "tensorflow", "keras",
-        "av",   # PyAV 依赖 macOS 14+ 新符号，在旧系统会崩溃
     ],
     noarchive=False,
     optimize=1,
