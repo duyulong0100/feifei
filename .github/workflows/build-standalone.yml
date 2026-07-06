@@ -82,6 +82,8 @@ jobs:
     defaults:
       run:
         shell: cmd
+    env:
+      PYTHONUTF8: "1"      # 强制 Python 使用 UTF-8，避免 Unicode 字符输出报错
     steps:
       - uses: actions/checkout@v4
 

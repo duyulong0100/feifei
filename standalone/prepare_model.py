@@ -39,21 +39,21 @@ def find_snapshot_dir(size: str) -> str:
 
 def download_model(size: str) -> None:
     """从 HuggingFace 下载模型到本地缓存（CI 环境）"""
-    print(f"  从 HuggingFace 下载 {size} 模型（约 500 MB，请耐心等待）…")
+    print(f"  Downloading {size} model from HuggingFace (~500 MB)...")
     try:
         from faster_whisper import WhisperModel
         os.makedirs(MODELS_ROOT, exist_ok=True)
         m = WhisperModel(size, device="cpu", compute_type="int8",
                          download_root=MODELS_ROOT)
         del m
-        print(f"  ✓ 下载完成")
+        print("  [OK] Download complete")
     except Exception as e:
-        print(f"  ❌ 下载失败：{e}", file=sys.stderr)
+        print(f"  [ERROR] Download failed: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def prepare(size: str = "small", auto_download: bool = False) -> None:
-    print(f"→ 准备 {size} 模型 → {DEST_DIR}")
+    print(f"[*] Preparing {size} model -> {DEST_DIR}")
 
     # 若本地缓存不存在且允许下载
     refs_file = os.path.join(MODELS_ROOT,
@@ -63,21 +63,21 @@ def prepare(size: str = "small", auto_download: bool = False) -> None:
         if auto_download:
             download_model(size)
         else:
-            print(f"  ❌ 本地缓存不存在：{refs_file}", file=sys.stderr)
-            print(f"  提示：使用 --download 参数自动从 HuggingFace 下载", file=sys.stderr)
+            print(f"  [ERROR] Local cache not found: {refs_file}", file=sys.stderr)
+            print(f"  Hint: use --download to fetch from HuggingFace", file=sys.stderr)
             sys.exit(1)
 
     snap_dir = find_snapshot_dir(size)
-    print(f"  snapshot 目录：{snap_dir}")
+    print(f"  snapshot: {snap_dir}")
 
     # 检查所有必需文件
     missing = [f for f in MODEL_FILES if not os.path.exists(os.path.join(snap_dir, f))]
     if missing:
-        raise FileNotFoundError(f"snapshot 目录缺少文件：{missing}")
+        raise FileNotFoundError(f"Missing files in snapshot: {missing}")
 
     # 清理旧目录
     if os.path.exists(DEST_DIR):
-        print(f"  清理旧 bundled_model/…")
+        print("  Cleaning old bundled_model/...")
         shutil.rmtree(DEST_DIR)
     os.makedirs(DEST_DIR, exist_ok=True)
 
@@ -86,14 +86,14 @@ def prepare(size: str = "small", auto_download: bool = False) -> None:
     for fname in MODEL_FILES:
         src = os.path.join(snap_dir, fname)
         dst = os.path.join(DEST_DIR, fname)
-        print(f"  拷贝 {fname} …", end="", flush=True)
+        print(f"  Copying {fname} ...", end="", flush=True)
         shutil.copy2(src, dst, follow_symlinks=True)
         size_mb = os.path.getsize(dst) / 1024 / 1024
         total  += os.path.getsize(dst)
         print(f" {size_mb:.1f} MB")
 
-    print(f"\n✅ bundled_model/ 准备完成（共 {total/1024/1024:.1f} MB）")
-    print(f"   目录：{DEST_DIR}\n")
+    print(f"\n[OK] bundled_model/ ready ({total/1024/1024:.1f} MB total)")
+    print(f"     Path: {DEST_DIR}\n")
 
 
 if __name__ == "__main__":
