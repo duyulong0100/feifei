@@ -139,8 +139,7 @@ jobs:
             Write-Host "⚠ Inno Setup 未找到，改用 ZIP 打包"
             $src = "dist\飞飞转录"
             $zip = "dist\飞飞转录单机版.zip"
-            "飞飞转录单机版`n`n使用方法：解压后运行 飞飞转录.exe`n首次启动约需 5-15 秒加载模型。" |
-              Out-File -FilePath "$src\使用说明.txt" -Encoding UTF8
+            Set-Content -Path "$src\使用说明.txt" -Encoding UTF8 -Value "飞飞转录单机版`n`n使用方法：解压后运行 飞飞转录.exe`n首次启动约需 5-15 秒加载模型。"
             Compress-Archive -Path "$src\*" -DestinationPath $zip -Force
             Write-Host "✅ ZIP 打包完成"
           }
