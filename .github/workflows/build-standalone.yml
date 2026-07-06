@@ -1,10 +1,10 @@
 name: Build Standalone (单机版)
 
 on:
-  workflow_dispatch:   # 在 Actions 页面手动触发
+  workflow_dispatch:
   push:
     tags:
-      - "standalone-*"   # 推 tag（如 standalone-v1.0.0）自动触发
+      - "standalone-*"
 
 jobs:
   # ── macOS DMG ─────────────────────────────────────────────────────────────
@@ -18,17 +18,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install system dependencies (portaudio for pyaudio)
+        run: brew install portaudio
+
+      - name: Install Python dependencies
         working-directory: standalone
         run: pip install pyinstaller pyqt6 pyaudio numpy faster-whisper
 
-      # 缓存 Whisper small 模型（避免每次重新下载 ~500 MB）
       - name: Cache Whisper model
         uses: actions/cache@v4
         id: model-cache
         with:
           path: whisper_models
-          key: whisper-small-v1
+          key: whisper-small-macos-v1
 
       - name: Download Whisper small model (if not cached)
         if: steps.model-cache.outputs.cache-hit != 'true'
@@ -41,30 +43,20 @@ jobs:
 
       - name: Build .app
         working-directory: standalone
-        run: pyinstaller --noconfirm --clean 飞飞转录.spec
+        run: pyinstaller --noconfirm --clean "飞飞转录.spec"
 
       - name: Create DMG
         working-directory: standalone
         run: |
           APP="dist/飞飞转录.app"
           DMG="dist/飞飞转录单机版.dmg"
-          STAGING="dist/_dmg_staging"
+          STAGING="dist/_staging"
 
           xattr -cr "$APP"
           rm -rf "$STAGING"
           mkdir -p "$STAGING"
           cp -R "$APP" "$STAGING/"
           ln -s /Applications "$STAGING/Applications"
-
-          cat > "$STAGING/安装说明.txt" << 'TXT'
-          飞飞转录 · 单机版
-
-          安装：把「飞飞转录.app」拖入「Applications」文件夹。
-          ✅ 单机版无需服务端，模型已内置，首次启动约需 5-15 秒加载模型。
-
-          首次打开提示"无法验证开发者"时：
-            右键点击 .app → 选「打开」→ 弹窗里点「打开」
-          TXT
 
           hdiutil create \
             -srcfolder "$STAGING" \
@@ -75,7 +67,7 @@ jobs:
             -ov        "$DMG"
 
           rm -rf "$STAGING"
-          echo "DMG size: $(du -sh $DMG | awk '{print $1}')"
+          du -sh "$DMG"
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
@@ -87,6 +79,9 @@ jobs:
   # ── Windows Setup.exe ────────────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: cmd
     steps:
       - uses: actions/checkout@v4
 
@@ -95,17 +90,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      # 设置控制台编码为 UTF-8，避免中文路径问题
+      - name: Set UTF-8 encoding
+        run: chcp 65001
+
+      - name: Install Python dependencies
         working-directory: standalone
         run: pip install pyinstaller pyqt6 pyaudio numpy faster-whisper
 
-      # 缓存 Whisper small 模型
       - name: Cache Whisper model
         uses: actions/cache@v4
         id: model-cache
         with:
           path: whisper_models
-          key: whisper-small-v1
+          key: whisper-small-windows-v1
 
       - name: Download Whisper small model (if not cached)
         if: steps.model-cache.outputs.cache-hit != 'true'
@@ -116,41 +114,35 @@ jobs:
         working-directory: standalone
         run: python prepare_model.py --size small
 
+      # Windows 下用 Python 调用 PyInstaller 避免中文文件名编码问题
       - name: Build exe
         working-directory: standalone
-        run: pyinstaller --noconfirm --clean 飞飞转录.spec
+        run: python -m PyInstaller --noconfirm --clean "飞飞转录.spec"
 
-      - name: Build installer (Inno Setup)
+      - name: Install Inno Setup
+        run: |
+          curl -L -o innosetup.exe https://jrsoftware.org/download.php/is.exe
+          innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+          echo "C:\Program Files (x86)\Inno Setup 6" >> %GITHUB_PATH%
+
+      - name: Build installer
         working-directory: standalone
         shell: powershell
         run: |
-          # GitHub Actions windows-latest 内置 Inno Setup
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (Test-Path $iscc) {
-            Write-Host "→ 使用 Inno Setup 制作安装包…"
+            Write-Host "→ 制作 Windows 安装包..."
             & $iscc installer.iss
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "✅ 安装包制作完成"
-            } else {
-              Write-Host "❌ Inno Setup 失败，退出码 $LASTEXITCODE"
-              exit 1
-            }
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup 失败" }
+            Write-Host "✅ 安装包制作完成"
           } else {
-            Write-Host "Inno Setup 未找到，改用 ZIP 打包…"
+            Write-Host "⚠ Inno Setup 未找到，改用 ZIP 打包"
             $src = "dist\飞飞转录"
             $zip = "dist\飞飞转录单机版.zip"
-            @"
-飞飞转录单机版 v1.0.0
-
-使用方法：
-  1. 解压本 ZIP 到任意目录
-  2. 运行「飞飞转录.exe」
-  3. 首次启动约需 5-15 秒加载模型，请耐心等待
-  4. 完全无需服务端，模型已内置
-
-"@ | Out-File -FilePath "$src\使用说明.txt" -Encoding UTF8
+            "飞飞转录单机版`n`n使用方法：解压后运行 飞飞转录.exe`n首次启动约需 5-15 秒加载模型。" |
+              Out-File -FilePath "$src\使用说明.txt" -Encoding UTF8
             Compress-Archive -Path "$src\*" -DestinationPath $zip -Force
-            Write-Host "✅ ZIP 打包完成：$zip"
+            Write-Host "✅ ZIP 打包完成"
           }
 
       - name: Upload Windows artifact
@@ -174,9 +166,6 @@ jobs:
         with:
           path: artifacts
 
-      - name: List artifacts
-        run: find artifacts -type f | sort
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -184,17 +173,15 @@ jobs:
           body: |
             ## 飞飞转录单机版
 
-            **内置 Whisper small 模型，无需服务端，开箱即用。**
+            内置 Whisper small 模型，无需服务端，开箱即用。
 
-            ### 安装说明
             - **macOS**：打开 DMG，拖入 Applications 文件夹
-            - **Windows**：运行 `飞飞转录单机版_Setup_*.exe` 按提示安装
+            - **Windows**：运行 `飞飞转录单机版_Setup_*.exe` 安装
 
             > 首次启动约需 5–15 秒加载模型，请耐心等待。
           files: |
             artifacts/飞飞转录单机版-macOS/飞飞转录单机版.dmg
             artifacts/飞飞转录单机版-Windows/飞飞转录单机版_Setup_*.exe
             artifacts/飞飞转录单机版-Windows/飞飞转录单机版.zip
-          generate_release_notes: false
           draft: false
           prerelease: false
