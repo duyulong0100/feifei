@@ -1,0 +1,7 @@
+# 单机版依赖（含本地转录引擎）
+pyqt6>=6.6.0
+pyaudio>=0.2.13
+numpy>=1.24.0
+faster-whisper>=1.0.0
+# faster-whisper 会自动拉取以下依赖：
+#   ctranslate2, tokenizers, huggingface_hub, av

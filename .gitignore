@@ -38,5 +38,12 @@ tmp_record.wav
 # Whisper 模型文件（体积较大）
 whisper_models/
 
+# 单机版内置模型目录（由 prepare_model.py 生成，不提交）
+standalone/bundled_model/
+
+# 单机版打包图标临时拷贝
+standalone/AppIcon.icns
+standalone/logo-app.icns
+
 # 日志
 *.log
